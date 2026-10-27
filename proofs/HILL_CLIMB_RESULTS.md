@@ -20,3 +20,21 @@ Synthetic tests are not a substitute for that live test.
 - Run: https://github.com/r33drichards/passkey-vault/actions/runs/40437676103
 
 These mocked GitHub tests prove code behavior, not a real installed GitHub App.
+
+## Deployed checks
+
+CI run `40437676103` completed successfully. Independent live checks confirmed:
+
+- `/health` returns 200 with service `serverless-hill-climb`.
+- `/admin` returns 200 and its manifest requests only `pull_requests: write`,
+  subscribes to `pull_request`, and sets the active hook to this Worker's
+  `/github/events` endpoint.
+- Unconfigured `/github/events` returns 503 (not accepting events before setup).
+- Unauthenticated `/admin/chatgpt` and generic `/webhook` return 401.
+- `/internal/credential` returns 404.
+- `hill climb` label created on the new repository.
+
+**Pending owner action:** create/install the dedicated GitHub App in the admin
+browser flow. No real GitHub webhook or posted ACK is claimed yet. After installation,
+open a test PR, add `hill climb`, verify one app-authored ACK, then remove/reapply
+label and redeliver the event to confirm no additional comment.
