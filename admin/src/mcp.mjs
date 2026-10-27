@@ -1,15 +1,20 @@
+export const LAMBDA_ENDPOINT='https://o27o445mvjsctrp4tryanmdste0pbjfi.lambda-url.us-east-1.on.aws/mcp';
+export const TOKEN_ENDPOINT='https://keycloak-production-295b.up.railway.app/realms/pi-lambda/protocol/openid-connect/token';
 // Direct MCP client. Lifecycle service sees only session/lease IDs, never code.
 // No automatic retries: a lost tool response may represent a completed side effect.
 export class NativeMcp {
   constructor(fetcher, lease) {
     const u=new URL(lease.url);
-    if(u.protocol!=='https:' || u.username || u.password || u.search || u.hash || !u.hostname.endsWith('.modal.host')) throw Error('invalid-connect-url');
+    if(u.protocol!=='https:' || u.username || u.password || u.search || u.hash || !(lease.transport==='lambda' ? u.href===LAMBDA_ENDPOINT : u.hostname.endsWith('.modal.host'))) throw Error('invalid-connect-url');
     if(typeof lease.token!=='string'||!lease.token||typeof lease.sandbox!=='string')throw Error('invalid-lease');
     this.fetcher=fetcher;this.lease=lease;this.sequence=0;
   }
   async rpc(method,params,notify=false) {
     const id=notify?undefined:++this.sequence;
-    const headers={Authorization:'Bearer '+this.lease.token,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':this.protocol || '2024-11-05'};
+    const token=this.getToken ? await this.getToken() : this.lease.token;
+    if(this.lease.transport==='lambda') params={...params,_meta:{...params?._meta,'io.modelcontextprotocol/protocolVersion':this.protocol,'io.modelcontextprotocol/clientCapabilities':{}}};
+    const headers={Authorization:'Bearer '+token,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':this.protocol || '2024-11-05'};
+    if(this.lease.transport==='lambda'){headers['Mcp-Method']=method;if(params?.name)headers['Mcp-Name']=params.name;headers['X-MCP-Session-Id']=this.lease.session;}
     if(this.session)headers['Mcp-Session-Id']=this.session;
     const r=await this.fetcher(this.lease.url,{method:'POST',redirect:'manual',headers,body:JSON.stringify({jsonrpc:'2.0',...(notify?{}:{id}),method,...(params?{params}:{})}),signal:AbortSignal.timeout(45000)});
     if(!r.ok){await r.body?.cancel();throw Error('mcp-http-failed-no-replay');}
@@ -44,8 +49,41 @@ export class NativeMcp {
     await this.rpc('notifications/initialized',undefined,true);
   }
   async run(code){
-    const result=await this.rpc('tools/call',{name:'run_js',arguments:{code}});
+    const result=await this.rpc('tools/call',{name:'run_js',arguments:this.lease.transport==='lambda'?{code,wait:true,execution_timeout_secs:15,fs:this.lease.session}:{code}});
     if(!Array.isArray(result?.content))throw Error('invalid-mcp-tool-result');
     return result;
+  }
+}
+
+// Lambda is sessionless: no initialize/session reuse and no tool-call retries.
+export class LambdaMcp extends NativeMcp {
+  constructor(fetcher, secret, session, now=()=>Date.now()) {
+    super(fetcher,{url:LAMBDA_ENDPOINT,token:'oauth-managed',sandbox:'lambda',transport:'lambda',session});
+    if(typeof secret!=='string'||!secret)throw Error('lambda-oauth-not-configured');
+    if(typeof session!=='string'||!/^pi-[a-f0-9]{64}$/.test(session))throw Error('invalid-lambda-session');
+    this.protocol='2026-07-28';
+    let cached,expires=0;
+    this.getToken=async()=>{
+      if(cached && now()<expires)return cached;
+      const r=await fetcher(TOKEN_ENDPOINT,{method:'POST',redirect:'manual',headers:{'Content-Type':'application/x-www-form-urlencoded',Accept:'application/json'},body:new URLSearchParams({grant_type:'client_credentials',client_id:'pi-lambda-client',client_secret:secret}).toString(),signal:AbortSignal.timeout(15000)});
+      if(!r.ok){await r.body?.cancel();throw Error('oauth-token-failed');}
+      let data;
+      try {
+        const reader=r.body.getReader();let text='',bytes=0;const dec=new TextDecoder();
+        try{for(;;){const {value,done}=await reader.read();if(done)break;bytes+=value.length;if(bytes>16384)throw Error();text+=dec.decode(value,{stream:true});}}finally{await reader.cancel().catch(()=>{});}
+        data=JSON.parse(text);
+      }catch{throw Error('oauth-invalid-response');}
+      if(typeof data.access_token!=='string'||!data.access_token||data.token_type?.toLowerCase()!=='bearer'||!Number.isFinite(data.expires_in)||data.expires_in<=30)throw Error('oauth-invalid-response');
+      cached=data.access_token;expires=now()+(Math.min(data.expires_in,300)-30)*1000;return cached;
+    };
+  }
+  async initialize() {}
+  async run(code) {
+    const result=await super.run(code);
+    const text=result.content.find(c=>c.type==='text')?.text;
+    let execution;
+    try {execution=JSON.parse(text);} catch {throw Error('invalid-inline-execution');}
+    if(!['completed','failed','cancelled','timed_out'].includes(execution.status))throw Error('nonterminal-inline-execution');
+    return {...result,isError:!!result.isError || execution.status!=='completed'};
   }
 }

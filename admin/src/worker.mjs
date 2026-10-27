@@ -1,4 +1,4 @@
-import { NativeMcp } from './mcp.mjs';
+import { NativeMcp, LambdaMcp } from './mcp.mjs';
 import { githubEvent, githubAlarm } from './github.mjs';
 import { Agent } from '@earendil-works/pi-agent-core';
 import { stream as streamResponses } from '@earendil-works/pi-ai/api/openai-responses';
@@ -66,7 +66,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.origin !== env.PUBLIC_ORIGIN) return new Response('Wrong host', {status:421,headers:HEADERS});
-    if (url.pathname === '/health' && request.method === 'GET') return Response.json({service:'serverless-hill-climb',admin:'deployed',webhook:'checkpointed'}, {headers:HEADERS});
+    if (url.pathname === '/health' && request.method === 'GET') return Response.json({service:'serverless-hill-climb',admin:'deployed',webhook:'checkpointed',toolTransport:env.PI_TOOL_TRANSPORT || 'modal'}, {headers:HEADERS});
     if (url.pathname === '/') return redirect('/admin');
     if (!ROUTES.has(url.pathname)) return new Response('Not found', {status:404,headers:HEADERS});
     return env.AUTH.get(env.AUTH.idFromName('owner')).fetch(request);
@@ -154,6 +154,15 @@ export class OwnerAuthority {
     if (url.origin!==origin) fail('Wrong host.',421);
     if(path==='/github/events') return githubEvent(this,request);
     if(path==='/webhook' || path==='/runs') return this.webhook(request);
+    if(path==='/ops/lambda-probe') {
+      if(request.method!=='POST' || !this.env.VERIFY_KEY || request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY) fail('Unauthorized.',401);
+      if(this.env.PI_TOOL_TRANSPORT!=='lambda') fail('Lambda transport is not configured.',503);
+      const session='pi-'+await hash('lambda-fixed-probe');
+      const client=new LambdaMcp(this.fetcher,this.env.LAMBDA_CLIENT_SECRET,session);
+      const result=await client.run("await fs.writeFile('/work/transport-proof.txt','pi-lambda-connected'); console.log(await fs.readFile('/work/transport-proof.txt','utf8'));");
+      if(result.isError || !JSON.stringify(result).includes('pi-lambda-connected')) fail('Lambda transport probe failed.',502);
+      return Response.json({transport:'lambda',status:'passed',modelConnected:!!await this.read('chatgpt'),modelVerified:(await this.read('inference-proof-v2'))?.status==='passed'},{headers:HEADERS});
+    }
     if(path==='/ops/verify') {
       if(request.method!=='POST' || !this.env.VERIFY_KEY || request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY) fail('Unauthorized.',401);
       // Fixed bounded diagnostic; cannot submit arbitrary prompts or export tokens.
@@ -323,14 +332,18 @@ export class OwnerAuthority {
         const proof=await this.read('inference-proof-v2');
         if(proof?.status!=='passed') throw Error('unverified-model');
         let turns=0,completed=0,transport;
+        const lambda=this.env.PI_TOOL_TRANSPORT==='lambda';
+        if(this.env.PI_TOOL_TRANSPORT && !['lambda','modal'].includes(this.env.PI_TOOL_TRANSPORT))throw Error('invalid-tool-transport');
+        run.transport=lambda?'lambda':'modal';
         const model={id:proof.model,name:proof.model,api:'openai-responses',provider:'openai',baseUrl:'https://api.openai.com/v1',reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32000,maxTokens:1024};
         const check=()=>{if(this.now()>run.deadline) throw Error('deadline');if(run.tools.some(t=>t.status==='intent'||t.status==='uncertain'))throw Error('prior-tool-uncertain-no-replay');};
-        const tool={name:'run_js',label:'JavaScript in isolated Modal engine',description:'Execute JavaScript in mcp-js. fs.writeFile(path,text), fs.readFile(path), fs.exists(path) are available ONLY below /data/workspace/. Await filesystem calls. console.log results. No Node imports, network or subprocess. Tool calls share one sandbox during this run. Files persist; do not rely on JavaScript heap persistence.',
+        const tool={name:'run_js',label:lambda?'JavaScript in Lambda':'JavaScript in isolated Modal engine',description:lambda?'Execute JavaScript in mcp-js on AWS Lambda. Await fs.writeFile, fs.readFile and fs.exists under /work/. Files persist in this session; never rely on live variables. Use console.log for output. No Node imports, network or subprocess.':'Execute JavaScript in mcp-js. fs.writeFile(path,text), fs.readFile(path), fs.exists(path) are available ONLY below /data/workspace/. Await filesystem calls. console.log results. No Node imports, network or subprocess. Tool calls share one sandbox during this run. Files persist; do not rely on JavaScript heap persistence.',
           parameters:{type:'object',properties:{code:{type:'string'}},required:['code'],additionalProperties:false},
           execute:async(callId,args)=>{
             check();if(run.tools.length>=4 || typeof args.code!=='string' || args.code.length>8192) throw Error('tool-budget');
             const call=await hash(id+':'+callId);
             const entry={call,status:'intent'};run.tools.push(entry);await this.save('run:'+id,run);
+            if(!transport && lambda){transport=new LambdaMcp(this.fetcher,this.env.LAMBDA_CLIENT_SECRET,'pi-'+await hash(run.session));await transport.initialize();}
             if(!transport){
               run.lease={id:await hash('mcp:'+id),status:'intent'};await this.save('run:'+id,run);
               const lease=await this.lifecycle('acquire',{session:run.session,lease:run.lease.id});
@@ -341,11 +354,11 @@ export class OwnerAuthority {
             let result;
             try {result=await transport.run(args.code);}
             catch {entry.status='uncertain';await this.save('run:'+id,run);throw Error('direct-mcp-failed-no-replay');}
-            entry.status='completed';entry.sandbox=transport.lease.sandbox;entry.isError=!!result.isError;
+            entry.status='completed';entry.transport=run.transport;entry.sandbox=transport.lease.sandbox;entry.isError=!!result.isError;
             entry.result=result;await this.save('run:'+id,run);
             return {content:[{type:'text',text:JSON.stringify(result)}],details:{sandbox:entry.sandbox}};
           }};
-        const agent=new Agent({initialState:{model,systemPrompt:'You are the owner personal Pi agent. Use run_js for requested file operations. Report only observed results. Never claim a tool succeeded without checking its output. Tool calls share a sandbox within this run. Files persist across runs; do not rely on JavaScript heap persistence.',tools:[tool]},toolExecution:'sequential',
+        const agent=new Agent({initialState:{model,systemPrompt:lambda?'You are the owner personal Pi agent. Use run_js for requested file operations under /work/. Report only observed results. Files persist within this session, but live JavaScript variables do not. Never claim success without checking output.':'You are the owner personal Pi agent. Use run_js for requested file operations. Report only observed results. Never claim a tool succeeded without checking its output. Tool calls share a sandbox within this run. Files persist across runs; do not rely on JavaScript heap persistence.',tools:[tool]},toolExecution:'sequential',
           streamFn:async(m,c,o)=>{
             check();if(++turns>4) throw Error('turn-budget');
             run.phase='model';run.turns=turns;await this.save('run:'+id,run);
