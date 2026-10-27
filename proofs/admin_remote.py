@@ -12,11 +12,11 @@ try:
     print('Sandbox:', sandbox.object_id, flush=True)
     p = sandbox.exec('mkdir', '-p', '/work/src', '/work/test')
     p.wait()
-    for rel in ['package.json', 'wrangler.jsonc', 'src/worker.mjs', 'src/github.mjs', 'src/mcp.mjs', 'test/auth.test.mjs', 'test/github.test.mjs', 'test/mcp.test.mjs']:
+    for rel in ['package.json', 'wrangler.jsonc'] + [str(p.relative_to(root)) for d in ['src','test'] for p in (root/d).glob('*.mjs')]:
         sandbox.filesystem.write_text((root / rel).read_text(), '/work/' + rel)
     if (root / 'package-lock.json').exists():
         sandbox.filesystem.write_text((root / 'package-lock.json').read_text(), '/work/package-lock.json')
-    command = 'cd /work && npm install --no-audit --no-fund && npm test && npm run build && WRANGLER_SEND_METRICS=false npm run check:worker'
+    command = 'cd /work && npm ci --no-audit --no-fund && npm test && npm run build && WRANGLER_SEND_METRICS=false npm run check:worker'
     p = sandbox.exec('sh', '-c', command, timeout=650)
     for line in p.stdout:
         print(line, end='', flush=True)

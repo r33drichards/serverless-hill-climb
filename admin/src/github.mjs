@@ -1,3 +1,4 @@
+import {hillclimbEvent} from './hillclimb-controller.mjs';
 import {SignJWT, importPKCS8} from 'jose';
 const enc=new TextEncoder();
 const response=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
@@ -21,6 +22,10 @@ export async function githubEvent(a,r){
   let p;try{p=JSON.parse(new TextDecoder().decode(raw));}catch{return response({error:'json'},400);}
   const event=r.headers.get('X-GitHub-Event');
   if(event==='ping')return response({status:'pong'});
+  if(a.env.HILLCLIMB_ENABLED==='true'){
+    try{return response(await hillclimbEvent(a,p,event,r.headers.get('X-GitHub-Delivery')),202);}
+    catch{return response({error:'hillclimb-admission-failed'},503);}
+  }
   if(event!=='pull_request'||p.action!=='labeled'||!triggerLabel(p.label?.name)||p.pull_request?.state!=='open')return response({status:'ignored'});
   const repo=p.repository,number=p.number,installation=p.installation?.id;
   if(String(repo?.owner?.id)!==a.env.GITHUB_OWNER_ID || String(p.pull_request?.base?.repo?.id)!==String(repo?.id))return response({error:'owner'},403);

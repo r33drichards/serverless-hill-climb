@@ -1,3 +1,8 @@
+import {policies} from './hillclimb-policies.mjs';
+import {hillclimbAlarm,installationHeaders} from './hillclimb-controller.mjs';
+import {runHillclimb} from './hillclimb-runner.mjs';
+import {gitRelay} from './git-relay.mjs';
+import gitBundle,{bundlePath} from './git-bundle.mjs';
 const transportHash=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
 import { NativeMcp, LambdaMcp } from './mcp.mjs';
 import { githubEvent, githubAlarm } from './github.mjs';
@@ -62,12 +67,15 @@ async function limitedText(body, limit) {
 
 // Worker routes are explicitly allowlisted. No public credential-export route.
 const ROUTES = new Set(['/github/events','/webhook','/runs','/admin','/setup/callback','/auth/github','/auth/github/callback',
-  '/ops/lambda-probe','/ops/verify','/admin/chatgpt/start','/admin/chatgpt','/admin/chatgpt/complete','/admin/chatgpt/disconnect','/admin/logout']);
+  '/admin/chatgpt/verify','/ops/hillclimb-readiness','/ops/lambda-probe','/ops/verify','/admin/chatgpt/start','/admin/chatgpt','/admin/chatgpt/complete','/admin/chatgpt/disconnect','/admin/logout']);
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.origin !== env.PUBLIC_ORIGIN) return new Response('Wrong host', {status:421,headers:HEADERS});
     if (url.pathname === '/health' && request.method === 'GET') return Response.json({service:'serverless-hill-climb',admin:'deployed',webhook:'checkpointed',toolTransport:env.PI_TOOL_TRANSPORT || 'modal'}, {headers:HEADERS});
+    if(policies[url.pathname] && request.method==='GET') return new Response(policies[url.pathname],{headers:{'Content-Type':'text/plain','Cache-Control':'no-store'}});
+    if (url.pathname === bundlePath && request.method==='GET') return new Response(gitBundle,{headers:{'Content-Type':'application/javascript','Cache-Control':'public,max-age=31536000,immutable'}});
+    if(url.pathname.startsWith('/git/')) return env.AUTH.get(env.AUTH.idFromName('owner')).fetch(request);
     if (url.pathname === '/') return redirect('/admin');
     if (!ROUTES.has(url.pathname)) return new Response('Not found', {status:404,headers:HEADERS});
     return env.AUTH.get(env.AUTH.idFromName('owner')).fetch(request);
@@ -145,6 +153,7 @@ export class OwnerAuthority {
     return values;
   }
   fetch(request) {
+    if(new URL(request.url).pathname.startsWith('/git/')) return gitRelay(this,request).catch(()=>new Response('Git relay failed',{status:502}));
     return this.serial(async()=> {
       try { return await this.route(request); }
       catch(e) { return page(`<section><h2>Request not completed</h2><p>${escape(e.safe?e.message:'The request could not be completed. No sensitive details have been logged.')}</p><a href="/admin">Return to admin</a></section>`,e.safe?e.status:500); }
@@ -155,6 +164,20 @@ export class OwnerAuthority {
     if (url.origin!==origin) fail('Wrong host.',421);
     if(path==='/github/events') return githubEvent(this,request);
     if(path==='/webhook' || path==='/runs') return this.webhook(request);
+    if(path==='/ops/hillclimb-readiness') {
+      if(request.method!=='POST'||!this.env.VERIFY_KEY||request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY)fail('Unauthorized.',401);
+      const result={modelVerified:(await this.read('inference-proof-v2'))?.status==='passed',gitPermissions:false,lambdaGit:false,relayAuth:false,enabled:this.env.HILLCLIMB_ENABLED==='true'};
+      const last=await this.read('gh-last');
+      if(last?.installation)try{await installationHeaders(this,last);result.gitPermissions=true;}catch{}
+      try{
+        const client=new LambdaMcp(this.fetcher,this.env.LAMBDA_CLIENT_SECRET,'pi-'+await transportHash('hillclimb-git-readiness'));
+        const moduleURL=this.env.PUBLIC_ORIGIN+bundlePath;
+        const check=await client.run(`const {git}=await import(${JSON.stringify(moduleURL)});const dir='/work/git-readiness';await fs.mkdir(dir,{recursive:true});await git.init({fs,dir,defaultBranch:'proof'});await fs.writeFile(dir+'/proof.txt','ready');await git.add({fs,dir,filepath:'proof.txt'});console.log('GIT_MODULE_READY');const relay=await fetch(${JSON.stringify(this.env.PUBLIC_ORIGIN+'/git/probe')});if(relay.status===200&&await relay.text()==='RELAY_AUTH_OK')console.log('RELAY_AUTH_OK');`);
+        result.lambdaGit=!check.isError&&JSON.stringify(check).includes('GIT_MODULE_READY');
+        result.relayAuth=!check.isError&&JSON.stringify(check).includes('RELAY_AUTH_OK');
+      }catch{}
+      return Response.json(result,{headers:HEADERS});
+    }
     if(path==='/ops/lambda-probe') {
       if(request.method!=='POST' || !this.env.VERIFY_KEY || request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY) fail('Unauthorized.',401);
       if(this.env.PI_TOOL_TRANSPORT!=='lambda') fail('Lambda transport is not configured.',503);
@@ -175,7 +198,9 @@ export class OwnerAuthority {
       if (!app) return this.setupPage();
       if (!s) return page(`<section><h2>Sign in to administer your agent</h2><p>Access is restricted to <strong>${escape(this.env.GITHUB_OWNER_LOGIN)}</strong>.</p><a class="button" href="/auth/github">Continue with GitHub</a></section>`);
       const recent=await this.read('gh-last');
-      return page(`<p>Signed in as ${escape(this.env.GITHUB_OWNER_LOGIN)}</p><section><h2>PR acknowledgement agent</h2><p>Install this app on selected repositories in your personal account. Label an open PR <code>hill climb</code> or <code>hillclimb</code>; the app comments once per PR.</p><a class="button" href="https://github.com/apps/${escape(app.slug)}/installations/new">Install on repositories</a><p>Webhook: <code>/github/events</code></p><p>Slice: fixed acknowledgement only. No model calls, code changes, merges, or Modal allocations.</p><p>Last job: ${escape(recent ? recent.status+' · '+recent.repo+'#'+recent.number : 'No matching delivery yet')}</p></section>${form(s,'/admin/logout','Sign out',true)}`);
+      const connected=(await this.read('chatgpt'))?.status==='ready';
+      const proof=await this.read('inference-proof-v2');
+      return page(`<p>Signed in as ${escape(this.env.GITHUB_OWNER_LOGIN)}</p><section><h2>PR acknowledgement agent</h2><p>Install this app on selected repositories in your personal account. Label an open PR <code>hill climb</code> or <code>hillclimb</code>; the app comments once per PR.</p><a class="button" href="https://github.com/apps/${escape(app.slug)}/installations/new">Install on repositories</a><p><a href="https://github.com/settings/apps/${escape(app.slug)}/permissions">App permissions and events</a>: Contents read/write, Actions read, Checks read, Pull requests read/write; subscribe to Pull request and Issue comment events. Approve updated installation permissions after saving.</p><p>Webhook: <code>/github/events</code></p><p>Slice: fixed acknowledgement only. No model calls, code changes, merges, or Modal allocations.</p><p>Last job: ${escape(recent ? recent.status+' · '+recent.repo+'#'+recent.number : 'No matching delivery yet')}</p></section><section><h2>Model connection</h2><p>${connected?'Connected':'Not connected'} · Inference: ${escape(proof?.status || 'not verified')}</p>${form(s,'/admin/chatgpt/start',connected?'Reconnect ChatGPT':'Connect ChatGPT')}${connected?form(s,'/admin/chatgpt/verify','Verify model connection'):''}</section>${form(s,'/admin/logout','Sign out',true)}`);
     }
     if(path==='/setup/callback' && request.method==='GET') {
       if(app) fail('GitHub is already configured.',409);
@@ -214,6 +239,11 @@ export class OwnerAuthority {
       await this.storage.delete('chatgpt-pending');
       return redirect('/admin',[cookie('session','',0)]);
     }
+    if(path==='/admin/chatgpt/verify') {
+      await this.post(request,s);
+      await this.verifyInference();
+      return redirect('/admin');
+    }
     if(path==='/admin/chatgpt/start') {
       await this.post(request,s);
       const old=await this.read('chatgpt');
@@ -225,7 +255,7 @@ export class OwnerAuthority {
     if(path==='/admin/chatgpt' && request.method==='GET') {
       const pending=await this.pending(s);
       const dest=new URL(OPENAI_ISSUER+'/api/accounts/authorize');
-      dest.search=new URLSearchParams({client_id:pending.clientId,agent_name_hint:'Durable Pi Modal',ext_agent_host_id:pending.host,response_type:'code',redirect_uri:CALLBACK,resource:RESOURCE,scope:SCOPES,state:pending.state,nonce:pending.nonce,code_challenge:await hash(pending.verifier),code_challenge_method:'S256'}).toString();
+      dest.search=new URLSearchParams({client_id:pending.clientId,agent_name_hint:'Serverless Hill Climb',ext_agent_host_id:pending.host,response_type:'code',redirect_uri:CALLBACK,resource:RESOURCE,scope:SCOPES,state:pending.state,nonce:pending.nonce,code_challenge:await hash(pending.verifier),code_challenge_method:'S256'}).toString();
       return page(`<section><h2>Connect your ChatGPT account</h2><p>Open ChatGPT in a new tab and approve access for your personal agent.</p><a class="button" target="_blank" rel="noopener noreferrer" href="${escape(dest)}">Continue with ChatGPT</a><p>After approval, your browser may show a connection error at <code>127.0.0.1:1455</code>. Copy the <strong>complete URL</strong> from that tab’s address bar and paste it here.</p><form method="post" action="/admin/chatgpt/complete">${csrfInput(s)}<label for="callback">Final redirect URL</label><input id="callback" name="callback" type="url" required autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:1455/auth/callback?…"><button>Save ChatGPT connection</button></form><p class="muted">Only this private page should receive the URL. Never paste it into chat.</p></section><a href="/admin">Back to admin</a>`);
     }
     if(path==='/admin/chatgpt/complete') {
@@ -315,6 +345,7 @@ export class OwnerAuthority {
   }
   alarm() {
     return this.serial(async()=>{
+      if(await hillclimbAlarm(this)) return;
       if(await githubAlarm(this)) return;
       const id=await this.storage.get('active-run'); if(!id) return;
       const run=await this.read('run:'+id);
@@ -381,6 +412,7 @@ export class OwnerAuthority {
       await this.storage.delete('active-run');await this.storage.deleteAlarm();
     });
   }
+  async hillclimbStep(job,context) { return runHillclimb(this,job,context); }
   async lifecycle(operation,body) {
     if(!this.env.BROKER_KEY || !this.env.BROKER_URL)throw Error('lifecycle-not-configured');
     const response=await this.fetcher(this.env.BROKER_URL+'/leases/'+operation,{method:'POST',redirect:'manual',headers:{Authorization:'Bearer '+this.env.BROKER_KEY,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(60000)});
