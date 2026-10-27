@@ -38,3 +38,14 @@ CI run `40437676103` completed successfully. Independent live checks confirmed:
 browser flow. No real GitHub webhook or posted ACK is claimed yet. After installation,
 open a test PR, add `hill climb`, verify one app-authored ACK, then remove/reapply
 label and redeliver the event to confirm no additional comment.
+
+## No-space alias — 2026-10-27
+
+Both `hillclimb` and `hill climb` now match at ingress and the live PR label
+recheck. They share one per-PR dedupe record. All 28 remote tests and Wrangler
+validation passed; Modal build sandbox terminated and active inventory was empty.
+Source commit `1894c8a`; deployment CI run `40439443537` succeeded.
+Reapplied `hillclimb` to r33drichards/weechat-mcp PR 16 after deployment. Two
+subsequent comment reads did not find the ACK marker. Real ACK remains unverified;
+app installation/delivery and private admin job status need checking. No claim of
+successful end-to-end commenting is made.
