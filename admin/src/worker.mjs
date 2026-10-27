@@ -61,7 +61,7 @@ async function limitedText(body, limit) {
 
 // Worker routes are explicitly allowlisted. No public credential-export route.
 const ROUTES = new Set(['/github/events','/webhook','/runs','/admin','/setup/callback','/auth/github','/auth/github/callback',
-  '/ops/verify','/admin/chatgpt/start','/admin/chatgpt','/admin/chatgpt/complete','/admin/chatgpt/disconnect','/admin/logout']);
+  '/ops/lambda-probe','/ops/verify','/admin/chatgpt/start','/admin/chatgpt','/admin/chatgpt/complete','/admin/chatgpt/disconnect','/admin/logout']);
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);

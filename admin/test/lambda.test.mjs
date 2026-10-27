@@ -32,3 +32,12 @@ test('Lambda rejects malformed credentials, session and token response before to
  let calls=0;const client=new LambdaMcp(async()=>{calls++;return Response.json({access_token:'x',token_type:'Bearer',expires_in:10});},'secret',session);
  await assert.rejects(client.run(''),/oauth-invalid-response/);assert.equal(calls,1);
 });
+
+test('fixed Lambda probe is routed but rejects unauthenticated callers',async()=>{
+ const {default:worker,OwnerAuthority}=await import('../src/worker.mjs');
+ const origin='https://unit.example';
+ const authority=new OwnerAuthority({storage:{}},{PUBLIC_ORIGIN:origin,VERIFY_KEY:'private'});
+ const env={PUBLIC_ORIGIN:origin,AUTH:{idFromName:()=> 'owner',get:()=>authority}};
+ const response=await worker.fetch(new Request(origin+'/ops/lambda-probe',{method:'POST'}),env);
+ assert.equal(response.status,401);
+});
