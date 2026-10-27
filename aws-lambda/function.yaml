@@ -1,0 +1,40 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: IAM-invoked native mcp-js Lambda container test; no URL or public API
+Parameters:
+  ImageUri:
+    Type: String
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/.+@sha256:[a-f0-9]{64}$'
+  RoleArn:
+    Type: String
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  AccessPointArn:
+    Type: String
+Resources:
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      Architectures: [x86_64]
+      Role: !Ref RoleArn
+      Timeout: 30
+      MemorySize: 512
+      ReservedConcurrentExecutions: 1
+      EphemeralStorage:
+        Size: 512
+      VpcConfig:
+        SubnetIds: [!Ref SubnetId]
+        SecurityGroupIds: [!Ref SecurityGroupId]
+      FileSystemConfigs:
+        - Arn: !Ref AccessPointArn
+          LocalMountPath: /mnt/workspace
+      Tags:
+        - Key: Purpose
+          Value: mcp-js-lambda-test
+Outputs:
+  FunctionName:
+    Value: !Ref Function
