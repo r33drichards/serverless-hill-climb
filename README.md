@@ -2,7 +2,7 @@
 
 Private, template-derived Cloudflare deployment. This first slice receives GitHub
 `pull_request` / `labeled` webhooks and posts a fixed acknowledgement when the exact
-label is **hill climb**. No code changes, merges, model calls, or Modal allocations
+label is **hill climb** or **hillclimb**. No code changes, merges, model calls, or Modal allocations
 occur at runtime. The Pi/Modal implementation from the template is retained for
 future slices; its credentials and live deployment are not copied.
 
@@ -13,7 +13,7 @@ Admin: https://serverless-hill-climb.rwendt1337.workers.dev/admin
 1. Choose **Set up with GitHub**, creating the dedicated private GitHub App.
 2. Sign in as `r33drichards` (numeric owner ID `57335981`).
 3. Select **Install on repositories**, then select the repositories to watch.
-4. Apply the exact `hill climb` label to an open PR in an installed repository
+4. Apply the exact `hill climb` or `hillclimb` label to an open PR in an installed repository
    owned by that account.
 
 GitHub configures the signed webhook at `/github/events` from the app manifest.

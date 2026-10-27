@@ -1,7 +1,8 @@
 import {SignJWT, importPKCS8} from 'jose';
 const enc=new TextEncoder();
 const response=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
-export const ACK='Ack — received the `hill climb` label. This slice only acknowledges the request; no code changes or hill-climbing have started.\n\n<!-- serverless-hill-climb:ack:v1 -->';
+const triggerLabel=name=>name==='hill climb'||name==='hillclimb';
+export const ACK='Ack — received the hill-climb request. This slice only acknowledges the request; no code changes or hill-climbing have started.\n\n<!-- serverless-hill-climb:ack:v1 -->';
 export async function validSignature(secret,raw,signature){
   if(!/^sha256=[a-f0-9]{64}$/.test(signature || '')) return false;
   const key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['verify']);
@@ -20,7 +21,7 @@ export async function githubEvent(a,r){
   let p;try{p=JSON.parse(new TextDecoder().decode(raw));}catch{return response({error:'json'},400);}
   const event=r.headers.get('X-GitHub-Event');
   if(event==='ping')return response({status:'pong'});
-  if(event!=='pull_request'||p.action!=='labeled'||p.label?.name!=='hill climb'||p.pull_request?.state!=='open')return response({status:'ignored'});
+  if(event!=='pull_request'||p.action!=='labeled'||!triggerLabel(p.label?.name)||p.pull_request?.state!=='open')return response({status:'ignored'});
   const repo=p.repository,number=p.number,installation=p.installation?.id;
   if(String(repo?.owner?.id)!==a.env.GITHUB_OWNER_ID || String(p.pull_request?.base?.repo?.id)!==String(repo?.id))return response({error:'owner'},403);
   if(!Number.isSafeInteger(repo.id)||!Number.isSafeInteger(number)||number<1||!Number.isSafeInteger(installation)||!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repo.full_name||''))return response({error:'payload'},400);
@@ -71,7 +72,7 @@ export async function githubAlarm(a){
       if(!grant.token)throw Error('installation-token');
       const headers={Authorization:'Bearer '+grant.token,'X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'};
       const pr=await a.json(`https://api.github.com/repos/${job.repo}/pulls/${job.number}`,{headers});
-      if(pr.state!=='open'||!pr.labels?.some(x=>x.name==='hill climb')){job.status='skipped';}
+      if(pr.state!=='open'||!pr.labels?.some(x=>triggerLabel(x.name))){job.status='skipped';}
       else{
         job.status='posting';await a.save(key,job); // side-effect intent checkpoint
         const comment=await a.json(`https://api.github.com/repos/${job.repo}/issues/${job.number}/comments`,{method:'POST',headers,body:JSON.stringify({body:ACK})});
