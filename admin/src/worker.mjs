@@ -1,3 +1,5 @@
+const transportHash=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
+import { NativeMcp, LambdaMcp } from './mcp.mjs';
 import { githubEvent, githubAlarm } from './github.mjs';
 import { Agent } from '@earendil-works/pi-agent-core';
 import { stream as streamResponses } from '@earendil-works/pi-ai/api/openai-responses';
@@ -60,12 +62,12 @@ async function limitedText(body, limit) {
 
 // Worker routes are explicitly allowlisted. No public credential-export route.
 const ROUTES = new Set(['/github/events','/webhook','/runs','/admin','/setup/callback','/auth/github','/auth/github/callback',
-  '/ops/verify','/admin/chatgpt/start','/admin/chatgpt','/admin/chatgpt/complete','/admin/chatgpt/disconnect','/admin/logout']);
+  '/ops/lambda-probe','/ops/verify','/admin/chatgpt/start','/admin/chatgpt','/admin/chatgpt/complete','/admin/chatgpt/disconnect','/admin/logout']);
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.origin !== env.PUBLIC_ORIGIN) return new Response('Wrong host', {status:421,headers:HEADERS});
-    if (url.pathname === '/health' && request.method === 'GET') return Response.json({service:'serverless-hill-climb',admin:'deployed',webhook:'checkpointed'}, {headers:HEADERS});
+    if (url.pathname === '/health' && request.method === 'GET') return Response.json({service:'serverless-hill-climb',admin:'deployed',webhook:'checkpointed',toolTransport:env.PI_TOOL_TRANSPORT || 'modal'}, {headers:HEADERS});
     if (url.pathname === '/') return redirect('/admin');
     if (!ROUTES.has(url.pathname)) return new Response('Not found', {status:404,headers:HEADERS});
     return env.AUTH.get(env.AUTH.idFromName('owner')).fetch(request);
@@ -153,6 +155,15 @@ export class OwnerAuthority {
     if (url.origin!==origin) fail('Wrong host.',421);
     if(path==='/github/events') return githubEvent(this,request);
     if(path==='/webhook' || path==='/runs') return this.webhook(request);
+    if(path==='/ops/lambda-probe') {
+      if(request.method!=='POST' || !this.env.VERIFY_KEY || request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY) fail('Unauthorized.',401);
+      if(this.env.PI_TOOL_TRANSPORT!=='lambda') fail('Lambda transport is not configured.',503);
+      const session='pi-'+await transportHash('lambda-fixed-probe');
+      const client=new LambdaMcp(this.fetcher,this.env.LAMBDA_CLIENT_SECRET,session);
+      const result=await client.run("await fs.writeFile('/work/transport-proof.txt','pi-lambda-connected'); console.log(await fs.readFile('/work/transport-proof.txt','utf8'));");
+      if(result.isError || !JSON.stringify(result).includes('pi-lambda-connected')) fail('Lambda transport probe failed.',502);
+      return Response.json({transport:'lambda',status:'passed',modelConnected:!!await this.read('chatgpt'),modelVerified:(await this.read('inference-proof-v2'))?.status==='passed'},{headers:HEADERS});
+    }
     if(path==='/ops/verify') {
       if(request.method!=='POST' || !this.env.VERIFY_KEY || request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY) fail('Unauthorized.',401);
       // Fixed bounded diagnostic; cannot submit arbitrary prompts or export tokens.
@@ -311,6 +322,7 @@ export class OwnerAuthority {
       if(['completed','failed','interrupted'].includes(run.status)) {await this.storage.delete('active-run');return;}
       if(run.status!=='queued') {
         run.status='interrupted';run.reason='uncertain-checkpoint-no-automatic-replay';
+        await this.releaseLease(run);
         await this.save('run:'+id,run);await this.storage.delete('active-run');return;
       }
       run.status='running';await this.save('run:'+id,run);
@@ -320,24 +332,34 @@ export class OwnerAuthority {
         const credential=await this.modelCredential();
         const proof=await this.read('inference-proof-v2');
         if(proof?.status!=='passed') throw Error('unverified-model');
-        let turns=0,completed=0;
+        let turns=0,completed=0,transport;
+        const lambda=this.env.PI_TOOL_TRANSPORT==='lambda';
+        if(this.env.PI_TOOL_TRANSPORT && !['lambda','modal'].includes(this.env.PI_TOOL_TRANSPORT))throw Error('invalid-tool-transport');
+        run.transport=lambda?'lambda':'modal';
         const model={id:proof.model,name:proof.model,api:'openai-responses',provider:'openai',baseUrl:'https://api.openai.com/v1',reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32000,maxTokens:1024};
-        const check=()=>{if(this.now()>run.deadline) throw Error('deadline');};
-        const tool={name:'run_js',label:'JavaScript in isolated Modal engine',description:'Execute JavaScript in mcp-js. fs.writeFile(path,text), fs.readFile(path), fs.exists(path) are available ONLY below /data/workspace/. Await filesystem calls. console.log results. No Node imports, network or subprocess. Every call recreates a sandbox; files persist, live variables do not.',
+        const check=()=>{if(this.now()>run.deadline) throw Error('deadline');if(run.tools.some(t=>t.status==='intent'||t.status==='uncertain'))throw Error('prior-tool-uncertain-no-replay');};
+        const tool={name:'run_js',label:lambda?'JavaScript in Lambda':'JavaScript in isolated Modal engine',description:lambda?'Execute JavaScript in mcp-js on AWS Lambda. Await fs.writeFile, fs.readFile and fs.exists under /work/. Files persist in this session; never rely on live variables. Use console.log for output. No Node imports, network or subprocess.':'Execute JavaScript in mcp-js. fs.writeFile(path,text), fs.readFile(path), fs.exists(path) are available ONLY below /data/workspace/. Await filesystem calls. console.log results. No Node imports, network or subprocess. Tool calls share one sandbox during this run. Files persist; do not rely on JavaScript heap persistence.',
           parameters:{type:'object',properties:{code:{type:'string'}},required:['code'],additionalProperties:false},
           execute:async(callId,args)=>{
             check();if(run.tools.length>=4 || typeof args.code!=='string' || args.code.length>8192) throw Error('tool-budget');
-            const call=await hash(id+':'+callId);
+            const call=await transportHash(id+':'+callId);
             const entry={call,status:'intent'};run.tools.push(entry);await this.save('run:'+id,run);
-            const response=await this.fetcher(this.env.BROKER_URL+'/tool',{method:'POST',redirect:'manual',headers:{Authorization:'Bearer '+this.env.BROKER_KEY,'Content-Type':'application/json'},body:JSON.stringify({session:run.session,call,code:args.code}),signal:AbortSignal.timeout(140000)});
-            if(!response.ok) {await response.body?.cancel();entry.status='uncertain';throw Error('broker-rejected');}
-            const data=JSON.parse(await limitedText(response.body,65536));
-            if(!data.terminated || !data.result) throw Error('invalid-broker-result');
-            entry.status='completed';entry.sandbox=data.sandbox;entry.terminated=true;entry.isError=!!data.result.isError;
-            entry.result=data.result;await this.save('run:'+id,run);
-            return {content:[{type:'text',text:JSON.stringify(data.result)}],details:{sandbox:data.sandbox}};
+            if(!transport && lambda){transport=new LambdaMcp(this.fetcher,this.env.LAMBDA_CLIENT_SECRET,'pi-'+await transportHash(run.session));await transport.initialize();}
+            if(!transport){
+              run.lease={id:await transportHash('mcp:'+id),status:'intent'};await this.save('run:'+id,run);
+              const lease=await this.lifecycle('acquire',{session:run.session,lease:run.lease.id});
+              if(lease.lease!==run.lease.id)throw Error('lease-mismatch');
+              run.lease.status='active';run.lease.sandbox=lease.sandbox;await this.save('run:'+id,run);
+              transport=new NativeMcp(this.fetcher,lease);await transport.initialize();
+            }
+            let result;
+            try {result=await transport.run(args.code);}
+            catch {entry.status='uncertain';await this.save('run:'+id,run);throw Error('direct-mcp-failed-no-replay');}
+            entry.status='completed';entry.transport=run.transport;entry.sandbox=transport.lease.sandbox;entry.isError=!!result.isError;
+            entry.result=result;await this.save('run:'+id,run);
+            return {content:[{type:'text',text:JSON.stringify(result)}],details:{sandbox:entry.sandbox}};
           }};
-        const agent=new Agent({initialState:{model,systemPrompt:'You are the owner personal Pi agent. Use run_js for requested file operations. Report only observed results. Never claim a tool succeeded without checking its output. Files persist but each tool call starts a fresh JS heap.',tools:[tool]},toolExecution:'sequential',
+        const agent=new Agent({initialState:{model,systemPrompt:lambda?'You are the owner personal Pi agent. Use run_js for requested file operations under /work/. Report only observed results. Files persist within this session, but live JavaScript variables do not. Never claim success without checking output.':'You are the owner personal Pi agent. Use run_js for requested file operations. Report only observed results. Never claim a tool succeeded without checking its output. Tool calls share a sandbox within this run. Files persist across runs; do not rely on JavaScript heap persistence.',tools:[tool]},toolExecution:'sequential',
           streamFn:async(m,c,o)=>{
             check();if(++turns>4) throw Error('turn-budget');
             run.phase='model';run.turns=turns;await this.save('run:'+id,run);
@@ -354,9 +376,26 @@ export class OwnerAuthority {
         run.status=completed===turns && last?.stopReason==='stop' && run.tools.every(t=>t.status==='completed' && !t.isError)?'completed':'failed';
         run.completedModelResponses=completed;
       } catch {run.status='failed';run.reason='bounded-run-failed-no-automatic-replay';}
+      if(!await this.releaseLease(run)){run.status='failed';run.reason='sandbox-cleanup-unverified';}
       run.finishedAt=this.now();await this.save('run:'+id,run);
       await this.storage.delete('active-run');await this.storage.deleteAlarm();
     });
+  }
+  async lifecycle(operation,body) {
+    if(!this.env.BROKER_KEY || !this.env.BROKER_URL)throw Error('lifecycle-not-configured');
+    const response=await this.fetcher(this.env.BROKER_URL+'/leases/'+operation,{method:'POST',redirect:'manual',headers:{Authorization:'Bearer '+this.env.BROKER_KEY,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(60000)});
+    if(!response.ok){await response.body?.cancel();throw Error('lifecycle-failed');}
+    return JSON.parse(await limitedText(response.body,8192));
+  }
+  async releaseLease(run) {
+    if(!run.lease)return true;
+    try {
+      const result=await this.lifecycle('release',{lease:run.lease.id});
+      if(result.lease!==run.lease.id || result.terminated!==true)throw Error('release-unverified');
+      run.lease.status='released';run.lease.terminated=true;
+      for(const entry of run.tools)entry.terminated=true;
+      return true;
+    }catch{run.lease.status='cleanup-unverified';return false;}
   }
   async verifyInference() {
     const previous=await this.read('inference-proof-v2');

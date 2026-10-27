@@ -1,0 +1,42 @@
+{
+  "image": "docker.io/wholelottahoopla/mcp-js@sha256:2f2752f606a5ded1a2044aa6ddc3691a7833fe4ea9517351c806d6136b606083",
+  "checks": [
+    {
+      "session": "session-a",
+      "unauthorized": 401,
+      "expected": [
+        "42",
+        "native-http-persisted"
+      ],
+      "calls": 4,
+      "sameLeaseReused": true
+    },
+    {
+      "session": "session-a",
+      "unauthorized": 401,
+      "expected": [
+        "native-http-persisted"
+      ],
+      "calls": 3,
+      "sameLeaseReused": true
+    },
+    {
+      "session": "session-b",
+      "unauthorized": 401,
+      "expected": [
+        "false"
+      ],
+      "calls": 3,
+      "sameLeaseReused": true
+    }
+  ],
+  "sandboxes": [
+    "sb-01M5XZCXPZPXQCNVDN1WHF4Q3E",
+    "sb-01M5XZD2M2YRJNYGXD3VAQK3YJ",
+    "sb-01M5XZD70AFKSZMZAXPF3X8N46"
+  ],
+  "activeEngineSandboxes": [],
+  "activeClientSandboxes": [],
+  "status": "passed",
+  "testVolumesDeleted": true
+}

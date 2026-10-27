@@ -48,3 +48,25 @@ It does not modify `durable-pi-modal` or the production passkey-vault Worker.
 Template documentation under `admin/`, `broker/`, and historical `proofs/`
 describes the original deployment. It is not evidence that this derivative has
 completed an actual GitHub installation or real webhook/comment test.
+
+## Proposed direct Modal MCP transport
+
+This branch replaces the tool-relaying broker with a small acquire/release
+controller. Pi talks directly to the pinned native mcp-js HTTP server through
+Modal Connect authentication, reusing one bounded sandbox per run. See
+[the transport design and rollout](broker/README.md) and
+[PR verification evidence](proofs/DIRECT_MCP_RESULTS.md).
+The live ACK-only deployment has not been changed by this work.
+
+## Lambda Pi transport
+
+`PI_TOOL_TRANSPORT=lambda` selects the OAuth-protected mcp-js Lambda endpoint.
+`LAMBDA_CLIENT_SECRET` is a Worker secret, never a browser credential. Tokens
+are refreshed before expiration. Tool requests use `wait: true`, a 15-second
+execution limit, stable hashed session IDs, and `/work/` S3-backed files. An
+uncertain tool response is never retried. The existing GitHub acknowledgement
+flow is unchanged; a real model-driven Pi run still requires a ChatGPT connection
+and successful inference verification in this app.
+
+The capability-protected `/ops/lambda-probe` performs a fixed write/read through
+the actual Worker transport. It does not prove a model-driven agent run.
