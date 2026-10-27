@@ -1,3 +1,19 @@
+# Current scope: Lambda only
+
+User narrowed the test on 2026-10-27: no EFS, no VPC, temporary files only.
+Use direct AWS APIs, not CloudFormation. The native image plus AWS Lambda Web
+Adapter remains the intended packaging. `fs.rego` now permits only `/tmp/` file
+operations. `function.yaml` is a reference definition only, with no EFS/VPC fields.
+Do not deploy `infra.yaml`: it belongs to the superseded EFS proposal below.
+
+Attempt to create the dedicated ECR repository was denied with
+`ecr:CreateRepository` for IAM user `sincere-ape`. No AWS resources were created.
+The new ECR permissions are not effective for this operation yet. Resume with
+repository creation, remote image build/push, a minimal Lambda execution role,
+and a bounded IAM-only invocation test when that access is fixed.
+
+## Superseded EFS proposal — reference only
+
 # Disposable native mcp-js AWS Lambda test — preparation only
 
 Status: not built, validated in AWS, or deployed. Waiting for private AWS access
