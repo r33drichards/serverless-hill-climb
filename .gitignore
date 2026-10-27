@@ -1,0 +1,6 @@
+admin/node_modules/
+admin/dist/
+admin/.wrangler/
+.dev.vars
+*.secret
+__pycache__/

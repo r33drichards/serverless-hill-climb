@@ -1,0 +1,29 @@
+{
+  "image": "docker.io/wholelottahoopla/mcp-js@sha256:2f2752f606a5ded1a2044aa6ddc3691a7833fe4ea9517351c806d6136b606083",
+  "evidence": [
+    {
+      "sandbox": "sb-01M5XDWQMPX0ANYA04ZGMSP3QK",
+      "terminated": true
+    },
+    {
+      "recreation_persistence": true
+    },
+    {
+      "sandbox": "sb-01M5XDWS5QQAD6XPQW275XC6NG",
+      "terminated": true
+    },
+    {
+      "sandbox": "sb-01M5XDWV03ACBK4XKRP2KY3V7T",
+      "terminated": true
+    },
+    {
+      "distinct_volume_isolation": true
+    },
+    {
+      "sandbox": "sb-01M5XDWXHQEFZ2Q3MBXP98MRCD",
+      "terminated": true
+    }
+  ],
+  "scope": "Volume files via sandbox exec, not engine filesystem policy or broker authentication",
+  "test_volumes": "ephemeral context closed"
+}

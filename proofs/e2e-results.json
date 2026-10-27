@@ -1,0 +1,114 @@
+{
+  "startedAt": 1793065311,
+  "runs": [
+    {
+      "id": "write-ae1ca22b14",
+      "session": "e2e-a-ae1ca22b14",
+      "status": "completed",
+      "modelResponses": 2,
+      "tools": [
+        {
+          "call": "vpsj7sX7wF2856bO9Oe7sRNT3IRe85SNx_MnIk-abvk",
+          "status": "completed",
+          "sandbox": "sb-01M5XGB16P41QSZZG6PG0XDYE2",
+          "terminated": true,
+          "isError": false,
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"output\":\"pi-file-ae1ca22b14\"}"
+              }
+            ],
+            "isError": false
+          }
+        }
+      ],
+      "output": "pi-file-ae1ca22b14",
+      "reason": null
+    },
+    {
+      "id": "read-ae1ca22b14",
+      "session": "e2e-a-ae1ca22b14",
+      "status": "completed",
+      "modelResponses": 2,
+      "tools": [
+        {
+          "call": "24-1lVVzid9rHlD0MkdcRq-6fbeVAuLDepB78b95bl4",
+          "status": "completed",
+          "sandbox": "sb-01M5XGBMJES19RDHJW95HVP66R",
+          "terminated": true,
+          "isError": false,
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"output\":\"pi-file-ae1ca22b14\"}"
+              }
+            ],
+            "isError": false
+          }
+        }
+      ],
+      "output": "Observed contents of `/data/workspace/proof.txt`:\n\n```text\npi-file-ae1ca22b14\n```",
+      "reason": null
+    },
+    {
+      "id": "isolation-ae1ca22b14",
+      "session": "e2e-b-ae1ca22b14",
+      "status": "completed",
+      "modelResponses": 2,
+      "tools": [
+        {
+          "call": "fzOIOkMsfTwi3YeEemjhmMCPJUvIBk2SHLYmMHezlzA",
+          "status": "completed",
+          "sandbox": "sb-01M5XGC1F2PXH2PDA33DMSHHME",
+          "terminated": true,
+          "isError": false,
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"output\":\"ISOLATED=true\"}"
+              }
+            ],
+            "isError": false
+          }
+        }
+      ],
+      "output": "Observed result: `ISOLATED=true`",
+      "reason": null
+    }
+  ],
+  "urls": {
+    "webhook": "https://durable-pi-modal.rwendt1337.workers.dev/webhook",
+    "admin": "https://durable-pi-modal.rwendt1337.workers.dev/admin",
+    "broker": "https://r33drichards--durable-pi-modal-broker-service.us-east.modal.run/tool"
+  },
+  "unauthorized_rejected": true,
+  "duplicate_no_reexecution": true,
+  "recreated_sandbox_persistence": true,
+  "two_session_isolation": true,
+  "sessions": [
+    "e2e-a-ae1ca22b14",
+    "e2e-b-ae1ca22b14"
+  ],
+  "status": "passed",
+  "cleanup": {
+    "activeSandboxes": [],
+    "volumes": [
+      {
+        "session": "proof-a",
+        "volumeDeleted": true
+      },
+      {
+        "session": "e2e-a-ae1ca22b14",
+        "volumeDeleted": true
+      },
+      {
+        "session": "e2e-b-ae1ca22b14",
+        "volumeDeleted": true
+      }
+    ]
+  }
+}

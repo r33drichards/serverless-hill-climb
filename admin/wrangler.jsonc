@@ -1,0 +1,33 @@
+{
+  "name": "durable-pi-modal",
+  "main": "dist/worker.mjs",
+  "compatibility_date": "2026-10-27",
+  "workers_dev": true,
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "PUBLIC_ORIGIN": "https://durable-pi-modal.rwendt1337.workers.dev",
+    "GITHUB_OWNER_ID": "57335981",
+    "GITHUB_OWNER_LOGIN": "r33drichards"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AUTH",
+        "class_name": "OwnerAuthority"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "auth-v1",
+      "new_sqlite_classes": [
+        "OwnerAuthority"
+      ]
+    }
+  ],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}
