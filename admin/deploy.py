@@ -8,7 +8,7 @@ import time
 import urllib.error
 import urllib.request
 
-NAME = 'durable-pi-modal'
+NAME = 'serverless-hill-climb'
 OWNER = '57335981'
 ACCOUNT = os.environ['CF_ACCOUNT']
 TOKEN = os.environ['CF_TOKEN']
@@ -52,11 +52,6 @@ bindings=[
     {'type':'plain_text','name':'GITHUB_OWNER_LOGIN','text':'r33drichards'},
     {'type':'durable_object_namespace','name':'AUTH','class_name':'OwnerAuthority'},
 ]
-bindings.extend([{'type':'plain_text','name':'BROKER_URL','text':'https://r33drichards--durable-pi-modal-broker-service.us-east.modal.run'},
-    {'type':'secret_text','name':'BROKER_KEY','text':os.environ['BROKER_KEY']},
-    {'type':'secret_text','name':'WEBHOOK_KEY','text':os.environ['WEBHOOK_KEY']}])
-verify_key=secrets.token_urlsafe(32)
-bindings.append({'type':'secret_text','name':'VERIFY_KEY','text':verify_key})
 metadata={'compatibility_flags':['nodejs_compat'],'main_module':'worker.mjs','compatibility_date':'2026-10-27','bindings':bindings,'observability':{'enabled':False}}
 if exists:
     settings=api(f'/scripts/{NAME}/settings')
@@ -92,29 +87,13 @@ else: raise RuntimeError('Deployed health check failed')
 status,body,headers=get('/admin')
 if status!=200 or ('Set up with GitHub' not in body and 'Continue with GitHub' not in body):
     raise RuntimeError('Admin page is not serving')
-for path,method,expected in [('/admin/chatgpt','GET',401),('/admin/chatgpt/start','POST',401),('/internal/credential','GET',404),('/webhook','POST',401),('/setup/callback?state=wrong&code=invalidtestcode','GET',400)]:
+for path,method,expected in [('/admin/chatgpt','GET',401),('/admin/chatgpt/start','POST',401),('/internal/credential','GET',404),('/webhook','POST',401),('/github/events','POST',503),('/setup/callback?state=wrong&code=invalidtestcode','GET',400)]:
     actual,_,_=get(path,method)
     # Once setup is complete, setup/callback is permanently disabled.
     if path.startswith('/setup') and actual==409: continue
     if actual!=expected: raise RuntimeError(f'Access check failed: {path} {actual}')
-summary=f'Admin deployed: {origin}/admin\nOwner ID: {OWNER}\nUnauthenticated ChatGPT routes rejected; credential export absent.\nGitHub/ChatGPT browser consent remains to be completed by owner.\n'
+summary=f'Hill Climb admin deployed: {origin}/admin\nOwner ID: {OWNER}\nUnauthenticated ChatGPT routes rejected; credential export absent.\nGitHub App creation and repository installation remain to be completed by owner.\n'
 print(summary)
 if os.environ.get('GITHUB_STEP_SUMMARY'):
     with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f: f.write(summary)
 
-# A temporary capability enables only the fixed one-shot diagnostic. Remove it
-# even when verification fails. No token or raw provider response enters CI logs.
-try:
-    request=urllib.request.Request(origin+'/ops/verify',method='POST',headers={
-        'User-Agent':'durable-pi-modal-smoke/1.0','Authorization':'Bearer '+verify_key})
-    try:
-        with client.open(request,timeout=90) as response:
-            proof=json.load(response)
-    except urllib.error.HTTPError as error:
-        proof={'status':'blocked','phase':'verification-route','httpStatus':error.code}
-    print('INFERENCE_PROOF '+json.dumps(proof))
-    if os.environ.get('GITHUB_STEP_SUMMARY'):
-        with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
-            f.write('\nServer-side Pi verification: `'+json.dumps(proof)+'`\n')
-finally:
-    api(f'/scripts/{NAME}/secrets/VERIFY_KEY','DELETE')

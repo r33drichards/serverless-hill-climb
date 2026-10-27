@@ -63,10 +63,10 @@ test('provider requests use Workers-compatible manual redirects and never follow
   await assert.rejects(auth.json('https://api.github.com/user',{headers:{Authorization:'Bearer TEST_ONLY'}}),e=>e.safe && e.status===502);
   assert.equal(calls,1);
 });
-test('owner manifest conversion stores encrypted app, discards PEM; replay denied',async()=>{
+test('owner manifest conversion stores encrypted app, encrypts PEM; replay denied',async()=>{
   const {auth,storage}=fixture();
   const c=cookiePair(await auth.setCookie('flow',{purpose:'manifest',state:'state'},600));
-  let calls=0; auth.fetcher=async()=>{calls++;return Response.json({owner:{id:57335981},id:1,client_id:'id',client_secret:'APP_SECRET',pem:'PRIVATE_KEY'});};
+  let calls=0; auth.fetcher=async()=>{calls++;return Response.json({owner:{id:57335981},id:1,client_id:'id',client_secret:'APP_SECRET',pem:'PRIVATE_KEY',webhook_secret:'HOOK_SECRET',slug:'hill-test'});};
   const request=()=>req('/setup/callback?state=state&code=abcdefghijklmn',{headers:{Cookie:c}});
   assert.equal((await auth.fetch(request())).status,303);
   assert.equal((await auth.read('github-app')).clientSecret,'APP_SECRET');

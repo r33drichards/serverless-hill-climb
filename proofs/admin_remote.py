@@ -3,7 +3,7 @@ from pathlib import Path
 import modal
 
 root = Path(__file__).resolve().parents[1] / 'admin'
-app = modal.App.lookup('durable-pi-modal-admin-build', create_if_missing=True)
+app = modal.App.lookup('serverless-hill-climb-build', create_if_missing=True)
 sandbox = None
 try:
     sandbox = modal.Sandbox.create('sleep', '900', app=app,
@@ -12,7 +12,7 @@ try:
     print('Sandbox:', sandbox.object_id, flush=True)
     p = sandbox.exec('mkdir', '-p', '/work/src', '/work/test')
     p.wait()
-    for rel in ['package.json', 'wrangler.jsonc', 'src/worker.mjs', 'test/auth.test.mjs']:
+    for rel in ['package.json', 'wrangler.jsonc', 'src/worker.mjs', 'src/github.mjs', 'test/auth.test.mjs', 'test/github.test.mjs']:
         sandbox.filesystem.write_text((root / rel).read_text(), '/work/' + rel)
     if (root / 'package-lock.json').exists():
         sandbox.filesystem.write_text((root / 'package-lock.json').read_text(), '/work/package-lock.json')

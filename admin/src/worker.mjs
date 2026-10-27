@@ -1,3 +1,4 @@
+import { githubEvent, githubAlarm } from './github.mjs';
 import { Agent } from '@earendil-works/pi-agent-core';
 import { stream as streamResponses } from '@earendil-works/pi-ai/api/openai-responses';
 import { createLocalJWKSet, jwtVerify } from 'jose';
@@ -28,8 +29,8 @@ const HEADERS = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
 };
 function page(body, status = 200, extra = {}) {
-  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Durable Pi · Admin</title><style>
-  :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#0b1120;color:#e2e8f0}body{max-width:680px;margin:8vh auto;padding:24px;line-height:1.6}h1{font-size:2.2rem;letter-spacing:-.04em}h2{font-size:1.2rem}section{background:#141e32;border:1px solid #2a3852;border-radius:16px;padding:24px;margin:24px 0}a{color:#93c5fd}button,.button{display:inline-block;background:#93c5fd;color:#0b1120;padding:12px 20px;border:0;border-radius:8px;font:inherit;font-weight:650;text-decoration:none;cursor:pointer}button.secondary{background:#26354c;color:#e2e8f0}input{width:100%;box-sizing:border-box;background:#0b1120;color:#fff;border:1px solid #526079;border-radius:8px;padding:12px;margin:8px 0 16px;font:inherit}.muted{color:#a4b2c8}.eyebrow{font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:#93c5fd}code{overflow-wrap:anywhere}form{margin:12px 0}footer{font-size:.9rem;color:#a4b2c8}</style></head><body><div class="eyebrow">Durable Pi + Modal</div><h1>Your agent, your account.</h1>${body}<footer>Owner-only administration · Credentials stay server-side.</footer></body></html>`, {
+  return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Serverless Hill Climb · Admin</title><style>
+  :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#0b1120;color:#e2e8f0}body{max-width:680px;margin:8vh auto;padding:24px;line-height:1.6}h1{font-size:2.2rem;letter-spacing:-.04em}h2{font-size:1.2rem}section{background:#141e32;border:1px solid #2a3852;border-radius:16px;padding:24px;margin:24px 0}a{color:#93c5fd}button,.button{display:inline-block;background:#93c5fd;color:#0b1120;padding:12px 20px;border:0;border-radius:8px;font:inherit;font-weight:650;text-decoration:none;cursor:pointer}button.secondary{background:#26354c;color:#e2e8f0}input{width:100%;box-sizing:border-box;background:#0b1120;color:#fff;border:1px solid #526079;border-radius:8px;padding:12px;margin:8px 0 16px;font:inherit}.muted{color:#a4b2c8}.eyebrow{font-size:.8rem;letter-spacing:.12em;text-transform:uppercase;color:#93c5fd}code{overflow-wrap:anywhere}form{margin:12px 0}footer{font-size:.9rem;color:#a4b2c8}</style></head><body><div class="eyebrow">Serverless Hill Climb</div><h1>Your agent, your account.</h1>${body}<footer>Owner-only administration · Credentials stay server-side.</footer></body></html>`, {
     status, headers: {...HEADERS, 'Content-Type':'text/html; charset=utf-8', ...extra},
   });
 }
@@ -58,13 +59,13 @@ async function limitedText(body, limit) {
 }
 
 // Worker routes are explicitly allowlisted. No public credential-export route.
-const ROUTES = new Set(['/webhook','/runs','/admin','/setup/callback','/auth/github','/auth/github/callback',
+const ROUTES = new Set(['/github/events','/webhook','/runs','/admin','/setup/callback','/auth/github','/auth/github/callback',
   '/ops/verify','/admin/chatgpt/start','/admin/chatgpt','/admin/chatgpt/complete','/admin/chatgpt/disconnect','/admin/logout']);
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.origin !== env.PUBLIC_ORIGIN) return new Response('Wrong host', {status:421,headers:HEADERS});
-    if (url.pathname === '/health' && request.method === 'GET') return Response.json({service:'durable-pi-modal',admin:'deployed',webhook:'checkpointed'}, {headers:HEADERS});
+    if (url.pathname === '/health' && request.method === 'GET') return Response.json({service:'serverless-hill-climb',admin:'deployed',webhook:'checkpointed'}, {headers:HEADERS});
     if (url.pathname === '/') return redirect('/admin');
     if (!ROUTES.has(url.pathname)) return new Response('Not found', {status:404,headers:HEADERS});
     return env.AUTH.get(env.AUTH.idFromName('owner')).fetch(request);
@@ -150,6 +151,7 @@ export class OwnerAuthority {
   async route(request) {
     const url=new URL(request.url), path=url.pathname, origin=this.env.PUBLIC_ORIGIN;
     if (url.origin!==origin) fail('Wrong host.',421);
+    if(path==='/github/events') return githubEvent(this,request);
     if(path==='/webhook' || path==='/runs') return this.webhook(request);
     if(path==='/ops/verify') {
       if(request.method!=='POST' || !this.env.VERIFY_KEY || request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY) fail('Unauthorized.',401);
@@ -161,9 +163,8 @@ export class OwnerAuthority {
     if(path==='/admin' && request.method==='GET') {
       if (!app) return this.setupPage();
       if (!s) return page(`<section><h2>Sign in to administer your agent</h2><p>Access is restricted to <strong>${escape(this.env.GITHUB_OWNER_LOGIN)}</strong>.</p><a class="button" href="/auth/github">Continue with GitHub</a></section>`);
-      const model=await this.read('chatgpt');
-      const connected=model?.status==='ready';
-      return page(`<p class="muted">Signed in as ${escape(this.env.GITHUB_OWNER_LOGIN)}</p><section><h2>ChatGPT connection</h2><p>${connected?'Connected. Your credentials are saved encrypted for the agent.':model?'Reconnect required. No automatic model requests will be made.':'Not connected yet.'}</p>${connected?`<p class="muted">Account: ${escape(model.identity.email || model.identity.sub)}</p>`:''}${form(s,'/admin/chatgpt/start',connected?'Reconnect ChatGPT':'Connect ChatGPT')}${model?form(s,'/admin/chatgpt/disconnect','Disconnect locally',true):''}</section><section><h2>Webhook agent</h2><p>Authenticated endpoint: <code>/webhook</code>. Runs are checkpointed; model and tool calls are bounded. A reported connection alone is not proof of a completed run.</p></section>${form(s,'/admin/logout','Sign out of admin',true)}`);
+      const recent=await this.read('gh-last');
+      return page(`<p>Signed in as ${escape(this.env.GITHUB_OWNER_LOGIN)}</p><section><h2>PR acknowledgement agent</h2><p>Install this app on selected repositories in your personal account. Label an open PR <code>hill climb</code>; the app comments once per PR.</p><a class="button" href="https://github.com/apps/${escape(app.slug)}/installations/new">Install on repositories</a><p>Webhook: <code>/github/events</code></p><p>Slice: fixed acknowledgement only. No model calls, code changes, merges, or Modal allocations.</p><p>Last job: ${escape(recent ? recent.status+' · '+recent.repo+'#'+recent.number : 'No matching delivery yet')}</p></section>${form(s,'/admin/logout','Sign out',true)}`);
     }
     if(path==='/setup/callback' && request.method==='GET') {
       if(app) fail('GitHub is already configured.',409);
@@ -171,9 +172,9 @@ export class OwnerAuthority {
       const code=url.searchParams.get('code'); if(!code || !/^[a-zA-Z0-9_-]{10,200}$/.test(code)) fail('Missing GitHub setup code.');
       const data=await this.json(`https://api.github.com/app-manifests/${encodeURIComponent(code)}/conversions`,{method:'POST',headers:{'X-GitHub-Api-Version':'2022-11-28'}});
       if(String(data.owner?.id)!==this.env.GITHUB_OWNER_ID) fail('This app must be owned by the configured GitHub account. No configuration was saved.',403);
-      if(!data.client_id || !data.client_secret || !data.id) fail('GitHub app response is incomplete.',502);
-      await this.save('github-app',{id:data.id,clientId:data.client_id,clientSecret:data.client_secret,owner:this.env.GITHUB_OWNER_ID});
-      // Deliberately discard app private key, webhook secret, and installation powers.
+      if(!data.client_id || !data.client_secret || !data.id || !data.pem || !data.webhook_secret || !/^[a-zA-Z0-9-]+$/.test(data.slug || '')) fail('GitHub app response is incomplete.',502);
+      await this.save('github-app',{id:data.id,clientId:data.client_id,clientSecret:data.client_secret,owner:this.env.GITHUB_OWNER_ID,privateKey:data.pem,webhookSecret:data.webhook_secret,slug:data.slug});
+      // App credentials are encrypted and never exposed to the browser.
       return redirect('/auth/github',[cookie('flow','',0)]);
     }
     if(path==='/auth/github' && request.method==='GET') {
@@ -247,8 +248,8 @@ export class OwnerAuthority {
   async setupPage() {
     const state=random();
     const origin=this.env.PUBLIC_ORIGIN;
-    const manifest={name:'Durable Pi Modal '+this.env.GITHUB_OWNER_LOGIN,url:origin,redirect_url:origin+'/setup/callback',callback_urls:[origin+'/auth/github/callback'],hook_attributes:{url:origin+'/github/events',active:false},public:false,default_permissions:{},default_events:[],description:'Private owner-only sign-in for Durable Pi Modal. No repository access requested.'};
-    return page(`<section><h2>One-time GitHub setup</h2><p>Create the private sign-in app under <strong>${escape(this.env.GITHUB_OWNER_LOGIN)}</strong>. GitHub will ask you to confirm its name. No repository permissions are requested.</p><form method="post" action="https://github.com/settings/apps/new?state=${state}"><input type="hidden" name="manifest" value="${escape(JSON.stringify(manifest))}"><button>Set up with GitHub</button></form><p class="muted">After setup, sign in with GitHub to connect ChatGPT. Other GitHub accounts cannot claim this agent.</p></section>`,200,{'Set-Cookie':await this.setCookie('flow',{purpose:'manifest',state},600)});
+    const manifest={name:'Serverless Hill Climb '+this.env.GITHUB_OWNER_LOGIN,url:origin,redirect_url:origin+'/setup/callback',callback_urls:[origin+'/auth/github/callback'],hook_attributes:{url:origin+'/github/events',active:true},public:false,default_permissions:{pull_requests:'write'},default_events:['pull_request'],description:'Acknowledge hill climb labels on selected owner repositories.'};
+    return page(`<section><h2>One-time GitHub setup</h2><p>Create the private sign-in app under <strong>${escape(this.env.GITHUB_OWNER_LOGIN)}</strong>. GitHub will ask you to confirm its name. Requests pull-request read/write permission to post acknowledgements. Install only on repositories you want it to watch.</p><form method="post" action="https://github.com/settings/apps/new?state=${state}"><input type="hidden" name="manifest" value="${escape(JSON.stringify(manifest))}"><button>Set up with GitHub</button></form><p class="muted">After setup, sign in with GitHub to connect ChatGPT. Other GitHub accounts cannot claim this agent.</p></section>`,200,{'Set-Cookie':await this.setCookie('flow',{purpose:'manifest',state},600)});
   }
   async pending(s) {
     const p=await this.read('chatgpt-pending');
@@ -303,6 +304,7 @@ export class OwnerAuthority {
   }
   alarm() {
     return this.serial(async()=>{
+      if(await githubAlarm(this)) return;
       const id=await this.storage.get('active-run'); if(!id) return;
       const run=await this.read('run:'+id);
       if(!run) {await this.storage.delete('active-run');return;}
