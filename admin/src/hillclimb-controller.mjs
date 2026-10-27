@@ -7,7 +7,7 @@ export async function installationHeaders(a,job) {
  const app=await a.read('github-app');
  const key=await importPKCS8(pkcs8(app.privateKey),'RS256');
  const jwt=await new SignJWT({}).setProtectedHeader({alg:'RS256'}).setIssuer(String(app.id)).setIssuedAt(Math.floor(a.now()/1000)-60).setExpirationTime(Math.floor(a.now()/1000)+300).sign(key);
- const headers={Authorization:'Bearer '+jwt,'X-GitHub-Api-Version':'2022-11-28'};
+ const headers={Authorization:'Bearer '+jwt,'X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'};
  const inst=await a.json(`${API}/app/installations/${job.installation}`,{headers});
  if(String(inst.account?.id)!==a.env.GITHUB_OWNER_ID||String(inst.app_id)!==String(app.id))throw Error('installation-scope');
  const grant=await a.json(`${API}/app/installations/${job.installation}/access_tokens`,{method:'POST',headers,body:JSON.stringify({repository_ids:[job.repoId],permissions:{contents:'write',pull_requests:'write',actions:'read',checks:'read'}})});
@@ -71,7 +71,8 @@ async function report(a,job,headers){
  if(!job.commentId){
   // Reconcile a potentially lost create response before considering another POST.
   const comments=await list(a,`${API}/repos/${job.repo}/issues/${job.number}/comments`,headers);
-  const previous=comments.find(c=>c.user?.type==='Bot'&&c.body?.includes(marker(job)));
+  const app=await a.read('github-app');
+  const previous=comments.find(c=>c.user?.type==='Bot'&&c.user?.login===app.slug+'[bot]'&&c.body?.includes(marker(job)));
   if(previous)job.commentId=previous.id;
   else if(job.commentIntent){job.phase='blocked';job.reason='Startup comment outcome uncertain; inspect before retry';await a.save(job.key,job);return;}
   else {

@@ -20,7 +20,9 @@ async function readBounded(body,max){
 }
 export async function gitRelay(a,r){
  if(!a.env.GIT_RELAY_KEY||r.headers.get('Authorization')!=='Bearer '+a.env.GIT_RELAY_KEY)return deny();
- const u=new URL(r.url),m=/^\/git\/(\d+)\/(\d+)\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(u.pathname);
+ const u=new URL(r.url);
+ if(u.pathname==='/git/probe'&&r.method==='GET')return new Response('RELAY_AUTH_OK',{headers:{'Cache-Control':'no-store'}});
+ const m=/^\/git\/(\d+)\/(\d+)\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(u.pathname);
  if(!m)return deny(404);
  const job=await a.read(`hc:${m[1]}:${m[2]}`),active=await a.storage.get('hc-active');
  if(!job||active!==job.key||job.paused||job.phase!=='executing'||!job.gitLeaseUntil||job.gitLeaseUntil<a.now())return deny();

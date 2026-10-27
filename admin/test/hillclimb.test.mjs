@@ -75,3 +75,11 @@ test('interrupted executing job is blocked instead of replaying tool calls',asyn
  const f=controller();const j=job();j.phase='executing';await f.a.save(j.key,j);await f.a.storage.put('hc-queue',[j.key]);
  await hillclimbAlarm(f.a);assert.equal((await f.a.read(j.key)).phase,'blocked');assert.equal(f.steps(),0);
 });
+import {gitRelay} from '../src/git-relay.mjs';
+test('relay diagnostic requires injection secret and never reflects it',async()=>{
+ const a={env:{GIT_RELAY_KEY:'test-relay-key'}};
+ const url='https://example.test/git/probe';
+ assert.equal((await gitRelay(a,new Request(url))).status,403);
+ const r=await gitRelay(a,new Request(url,{headers:{Authorization:'Bearer test-relay-key'}}));
+ assert.equal(r.status,200);assert.equal(await r.text(),'RELAY_AUTH_OK');
+});

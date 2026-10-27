@@ -166,14 +166,15 @@ export class OwnerAuthority {
     if(path==='/webhook' || path==='/runs') return this.webhook(request);
     if(path==='/ops/hillclimb-readiness') {
       if(request.method!=='POST'||!this.env.VERIFY_KEY||request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY)fail('Unauthorized.',401);
-      const result={modelVerified:(await this.read('inference-proof-v2'))?.status==='passed',gitPermissions:false,lambdaGit:false,enabled:this.env.HILLCLIMB_ENABLED==='true'};
+      const result={modelVerified:(await this.read('inference-proof-v2'))?.status==='passed',gitPermissions:false,lambdaGit:false,relayAuth:false,enabled:this.env.HILLCLIMB_ENABLED==='true'};
       const last=await this.read('gh-last');
       if(last?.installation)try{await installationHeaders(this,last);result.gitPermissions=true;}catch{}
       try{
         const client=new LambdaMcp(this.fetcher,this.env.LAMBDA_CLIENT_SECRET,'pi-'+await transportHash('hillclimb-git-readiness'));
         const moduleURL=this.env.PUBLIC_ORIGIN+bundlePath;
-        const check=await client.run(`const {git}=await import(${JSON.stringify(moduleURL)});const dir='/work/git-readiness';await fs.mkdir(dir,{recursive:true});await git.init({fs,dir,defaultBranch:'proof'});await fs.writeFile(dir+'/proof.txt','ready');await git.add({fs,dir,filepath:'proof.txt'});console.log('GIT_MODULE_READY');`);
+        const check=await client.run(`const {git}=await import(${JSON.stringify(moduleURL)});const dir='/work/git-readiness';await fs.mkdir(dir,{recursive:true});await git.init({fs,dir,defaultBranch:'proof'});await fs.writeFile(dir+'/proof.txt','ready');await git.add({fs,dir,filepath:'proof.txt'});console.log('GIT_MODULE_READY');const relay=await fetch(${JSON.stringify(this.env.PUBLIC_ORIGIN+'/git/probe')});if(relay.status===200&&await relay.text()==='RELAY_AUTH_OK')console.log('RELAY_AUTH_OK');`);
         result.lambdaGit=!check.isError&&JSON.stringify(check).includes('GIT_MODULE_READY');
+        result.relayAuth=!check.isError&&JSON.stringify(check).includes('RELAY_AUTH_OK');
       }catch{}
       return Response.json(result,{headers:HEADERS});
     }
