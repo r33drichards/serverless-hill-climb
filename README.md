@@ -48,3 +48,12 @@ It does not modify `durable-pi-modal` or the production passkey-vault Worker.
 Template documentation under `admin/`, `broker/`, and historical `proofs/`
 describes the original deployment. It is not evidence that this derivative has
 completed an actual GitHub installation or real webhook/comment test.
+
+## Proposed direct Modal MCP transport
+
+This branch replaces the tool-relaying broker with a small acquire/release
+controller. Pi talks directly to the pinned native mcp-js HTTP server through
+Modal Connect authentication, reusing one bounded sandbox per run. See
+[the transport design and rollout](broker/README.md) and
+[PR verification evidence](proofs/DIRECT_MCP_RESULTS.md).
+The live ACK-only deployment has not been changed by this work.
