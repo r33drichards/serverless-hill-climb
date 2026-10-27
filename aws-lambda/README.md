@@ -1,3 +1,13 @@
+## Live Lambda-only test — 2026-10-27
+
+Function `mcp-js-lambda-test-20261027-v2` is Active in us-east-1. See `live-results.json` for image digests and observed native MCP output. A synchronous sessionless MCP 2026-07-28 tools/call executed JavaScript and wrote/read `/tmp/lambda-proof.txt`. This proves within-invocation storage, NOT durable storage across cold starts.
+
+Function URL currently requires AWS_IAM; unsigned request returns 403, SigV4-signed health request returns 200. Keycloak/public OAuth is not configured. Upstream JWKS verification must be reviewed for issuer/audience/expiry requirements before public exposure.
+
+The initial function `mcp-js-lambda-test-20261027` remains Failed/InvalidImage. Corrected OCI layer explicitly creates parent directories. Deletion was denied (`lambda:DeleteFunction`); cleanup still required. Both remote build sandboxes were terminated.
+
+`build_image.py` runs remotely with crane v0.20.3, ECR registry login and `/tmp/fs.rego`; it reproduces the OCI layer construction without a Docker daemon. Dockerfile expresses the equivalent image. No AWS credentials are committed.
+
 # Current scope: Lambda only
 
 User narrowed the test on 2026-10-27: no EFS, no VPC, temporary files only.
@@ -78,3 +88,9 @@ Never forward general account credentials into the engine image or test events.
    EFS resources, ENIs or stacks remain.
 
 This does not migrate the application or replace production Modal services.
+
+Repeat the authenticated smoke test with AWS CLI credentials configured privately:
+
+```sh
+aws lambda invoke --region us-east-1 --function-name mcp-js-lambda-test-20261027-v2 --payload fileb://aws-lambda/smoke-event.json /tmp/mcp-result.json
+```

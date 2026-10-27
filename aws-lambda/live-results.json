@@ -1,0 +1,35 @@
+{
+  "function": "mcp-js-lambda-test-20261027-v2",
+  "region": "us-east-1",
+  "state": "Active",
+  "functionUrl": "https://o27o445mvjsctrp4tryanmdste0pbjfi.lambda-url.us-east-1.on.aws/",
+  "urlAuth": "AWS_IAM",
+  "unsignedUrlStatus": 403,
+  "signedUrlHealthStatus": 200,
+  "nativeVersion": "0.23.0-rc.1",
+  "imageDigest": "sha256:8a331f361f030b4e3bbff39dd2d90df4e4e44b634b929236563060cca44b24ba",
+  "adapterDigest": "sha256:9d6b29a45b14a4a70f88d53c68b6d5bab1b22d75baca733958fee59308c509b8",
+  "memoryMB": 512,
+  "timeoutSeconds": 30,
+  "reservedConcurrency": 1,
+  "efs": false,
+  "vpc": false,
+  "mcpResponse": {
+    "statusCode": 200,
+    "headers": {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      "x-accel-buffering": "no",
+      "date": "Tue, 27 Oct 2026 06:49:58 GMT"
+    },
+    "multiValueHeaders": {},
+    "body": "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"output\\\":\\\"42\\\\nlambda-native-42\\\"}\"}],\"isError\":false}}\n\n",
+    "isBase64Encoded": false,
+    "cookies": []
+  },
+  "remoteBuildersTerminated": true,
+  "pending": [
+    "Keycloak issuer/audience and authenticated integration tests",
+    "Delete failed first function mcp-js-lambda-test-20261027: lambda:DeleteFunction denied"
+  ]
+}

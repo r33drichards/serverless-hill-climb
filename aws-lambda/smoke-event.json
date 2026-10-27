@@ -1,0 +1,29 @@
+{
+  "version": "2.0",
+  "routeKey": "$default",
+  "rawPath": "/mcp",
+  "rawQueryString": "",
+  "headers": {
+    "host": "localhost",
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2026-07-28",
+    "mcp-method": "tools/call",
+    "mcp-name": "run_js"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/mcp",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "127.0.0.1",
+      "userAgent": "lambda-smoke"
+    },
+    "requestId": "mcp-smoke",
+    "routeKey": "$default",
+    "stage": "$default",
+    "timeEpoch": 1793083700000
+  },
+  "body": "{\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"tools/call\", \"params\": {\"_meta\": {\"io.modelcontextprotocol/protocolVersion\": \"2026-07-28\", \"io.modelcontextprotocol/clientCapabilities\": {}}, \"name\": \"run_js\", \"arguments\": {\"code\": \"await fs.writeFile('/tmp/lambda-proof.txt','lambda-native-42'); console.log(6*7); console.log(await fs.readFile('/tmp/lambda-proof.txt','utf8'));\"}}}",
+  "isBase64Encoded": false
+}
