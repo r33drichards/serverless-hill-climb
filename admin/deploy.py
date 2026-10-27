@@ -52,6 +52,9 @@ bindings=[
     {'type':'plain_text','name':'GITHUB_OWNER_LOGIN','text':'r33drichards'},
     {'type':'durable_object_namespace','name':'AUTH','class_name':'OwnerAuthority'},
     {'type':'plain_text','name':'PI_TOOL_TRANSPORT','text':'lambda'},
+    {'type':'plain_text','name':'HILLCLIMB_ENABLED','text':os.environ.get('HILLCLIMB_ENABLED','false')},
+    {'type':'plain_text','name':'HILLCLIMB_LAMBDA_READY','text':os.environ.get('HILLCLIMB_LAMBDA_READY','false')},
+    {'type':'secret_text','name':'GIT_RELAY_KEY','text':os.environ['HILL_GIT_RELAY_KEY']},
     {'type':'secret_text','name':'LAMBDA_CLIENT_SECRET','text':os.environ['LAMBDA_CLIENT_SECRET']},
     {'type':'secret_text','name':'VERIFY_KEY','text':os.environ['HILL_VERIFY_KEY']},
 ]
@@ -98,14 +101,29 @@ for path,method,expected in [('/admin/chatgpt','GET',401),('/admin/chatgpt/start
     # Once setup is complete, setup/callback is permanently disabled.
     if path.startswith('/setup') and actual==409: continue
     if actual!=expected: raise RuntimeError(f'Access check failed: {path} {actual}')
-summary=f'Hill Climb admin deployed: {origin}/admin\nOwner ID: {OWNER}\nUnauthenticated ChatGPT routes rejected; credential export absent.\nGitHub App creation and repository installation remain to be completed by owner.\n'
+summary=f'Hill Climb admin deployed: {origin}/admin\nOwner ID: {OWNER}\nUnauthenticated ChatGPT routes rejected; credential export absent.\nExisting GitHub App installation is preserved; repair activation is separately capability-gated.\n'
 print(summary)
 if os.environ.get('GITHUB_STEP_SUMMARY'):
     with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f: f.write(summary)
 
 
 request=urllib.request.Request(origin+'/ops/lambda-probe',method='POST',data=b'',headers={'Authorization':'Bearer '+os.environ['HILL_VERIFY_KEY'],'User-Agent':'durable-pi-modal-smoke/1.0'})
-with client.open(request,timeout=55) as response:
-    proof=json.load(response)
+for attempt in range(4):
+    try:
+        with client.open(request,timeout=55) as response: proof=json.load(response)
+        break
+    except urllib.error.HTTPError:
+        if attempt==3: raise
+        time.sleep(3)
 assert proof.get('status')=='passed' and proof.get('transport')=='lambda', 'Lambda transport probe failed'
 print(json.dumps({'lambdaTransportProof':proof}))
+
+request=urllib.request.Request(origin+'/ops/hillclimb-readiness',method='POST',data=b'',headers={'Authorization':'Bearer '+os.environ['HILL_VERIFY_KEY'],'User-Agent':'durable-pi-modal-smoke/1.0'})
+for attempt in range(4):
+    try:
+        with client.open(request,timeout=55) as response: readiness=json.load(response)
+        print(json.dumps({'hillclimbReadiness':readiness}))
+        break
+    except urllib.error.HTTPError:
+        if attempt==3: raise
+        time.sleep(3)

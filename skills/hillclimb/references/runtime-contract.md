@@ -4,7 +4,7 @@
 
 Load the Markdown body of `skills/hillclimb/SKILL.md` as the dedicated Hillclimb agent's system instructions; supply verified event context separately. Do not concatenate raw webhook/comment text into the system instructions. Keep the personal-agent and authentication-probe prompts separate.
 
-This is an instruction artifact, not a live activation. At inspection, the app's GitHub handler only acknowledges labels, subscribes to `pull_request`, requests `pull_requests:write`, and does not dispatch Hillclimb or accept comment commands. The model connection has not been verified for this app. The existing four-tool/four-turn personal-agent runner is not a durable CI-repair loop. Changing its prompt alone would not implement this contract.
+This is an instruction artifact, not a live activation. The controller and Git relay are implemented on `feat/hillclimb-agent`, behind `HILLCLIMB_ENABLED`. The deployed model connection has been verified by the owner. Activation still requires verified Lambda Git/module policies, expanded installation permissions, issue-comment subscription, and a live failing-PR repair proof. The unrelated personal-agent runner remains separate. Draft code or passing unit tests are not E2E evidence.
 
 ## Git and credentials
 
@@ -48,7 +48,7 @@ Verify signatures over the raw webhook body and validate installation/repository
 - `issue_comment`: `created` on a PR handles `/hillclimb` commands from the owner or explicitly authorized maintainers. PR conversation comments use this event, not `pull_request_review_comment`. Ignore bots, self-comments, ordinary issue comments and duplicate deliveries. Verify current collaborator permission, not merely the displayed name or author association.
 - CI completion events, or a bounded durable polling alarm: resume only the matching job/head. Coalesce duplicate events and do not run multiple repair loops.
 
-GitHub documents the [webhook events and payloads](https://docs.github.com/en/webhooks/webhook-events-and-payloads#issue_comment). Comments cannot trigger this behavior until subscription and handler code are implemented.
+GitHub documents the [webhook events and payloads](https://docs.github.com/en/webhooks/webhook-events-and-payloads#issue_comment). Comments cannot trigger this behavior until the subscription is enabled and the controller activation flag is set. The initial controller supports same-repository PRs only; fork heads explicitly block.
 
 Lambda calls must use `wait: true`, bounded inline output and stable session recovery. Long CI waits happen outside Lambda. Runtime DynamoDB execution/console recovery must be proved on the deployed version; do not infer it from filesystem recovery or an unmerged implementation.
 

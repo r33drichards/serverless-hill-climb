@@ -1,4 +1,5 @@
-import {hillclimbAlarm} from './hillclimb-controller.mjs';
+import {policies} from './hillclimb-policies.mjs';
+import {hillclimbAlarm,installationHeaders} from './hillclimb-controller.mjs';
 import {runHillclimb} from './hillclimb-runner.mjs';
 import {gitRelay} from './git-relay.mjs';
 import gitBundle,{bundlePath} from './git-bundle.mjs';
@@ -66,12 +67,13 @@ async function limitedText(body, limit) {
 
 // Worker routes are explicitly allowlisted. No public credential-export route.
 const ROUTES = new Set(['/github/events','/webhook','/runs','/admin','/setup/callback','/auth/github','/auth/github/callback',
-  '/admin/chatgpt/verify','/ops/lambda-probe','/ops/verify','/admin/chatgpt/start','/admin/chatgpt','/admin/chatgpt/complete','/admin/chatgpt/disconnect','/admin/logout']);
+  '/admin/chatgpt/verify','/ops/hillclimb-readiness','/ops/lambda-probe','/ops/verify','/admin/chatgpt/start','/admin/chatgpt','/admin/chatgpt/complete','/admin/chatgpt/disconnect','/admin/logout']);
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.origin !== env.PUBLIC_ORIGIN) return new Response('Wrong host', {status:421,headers:HEADERS});
     if (url.pathname === '/health' && request.method === 'GET') return Response.json({service:'serverless-hill-climb',admin:'deployed',webhook:'checkpointed',toolTransport:env.PI_TOOL_TRANSPORT || 'modal'}, {headers:HEADERS});
+    if(policies[url.pathname] && request.method==='GET') return new Response(policies[url.pathname],{headers:{'Content-Type':'text/plain','Cache-Control':'no-store'}});
     if (url.pathname === bundlePath && request.method==='GET') return new Response(gitBundle,{headers:{'Content-Type':'application/javascript','Cache-Control':'public,max-age=31536000,immutable'}});
     if(url.pathname.startsWith('/git/')) return env.AUTH.get(env.AUTH.idFromName('owner')).fetch(request);
     if (url.pathname === '/') return redirect('/admin');
@@ -162,6 +164,19 @@ export class OwnerAuthority {
     if (url.origin!==origin) fail('Wrong host.',421);
     if(path==='/github/events') return githubEvent(this,request);
     if(path==='/webhook' || path==='/runs') return this.webhook(request);
+    if(path==='/ops/hillclimb-readiness') {
+      if(request.method!=='POST'||!this.env.VERIFY_KEY||request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY)fail('Unauthorized.',401);
+      const result={modelVerified:(await this.read('inference-proof-v2'))?.status==='passed',gitPermissions:false,lambdaGit:false,enabled:this.env.HILLCLIMB_ENABLED==='true'};
+      const last=await this.read('gh-last');
+      if(last?.installation)try{await installationHeaders(this,last);result.gitPermissions=true;}catch{}
+      try{
+        const client=new LambdaMcp(this.fetcher,this.env.LAMBDA_CLIENT_SECRET,'pi-'+await transportHash('hillclimb-git-readiness'));
+        const moduleURL=this.env.PUBLIC_ORIGIN+bundlePath;
+        const check=await client.run(`const {git}=await import(${JSON.stringify(moduleURL)});const dir='/work/git-readiness';await fs.mkdir(dir,{recursive:true});await git.init({fs,dir,defaultBranch:'proof'});await fs.writeFile(dir+'/proof.txt','ready');await git.add({fs,dir,filepath:'proof.txt'});console.log('GIT_MODULE_READY');`);
+        result.lambdaGit=!check.isError&&JSON.stringify(check).includes('GIT_MODULE_READY');
+      }catch{}
+      return Response.json(result,{headers:HEADERS});
+    }
     if(path==='/ops/lambda-probe') {
       if(request.method!=='POST' || !this.env.VERIFY_KEY || request.headers.get('Authorization')!=='Bearer '+this.env.VERIFY_KEY) fail('Unauthorized.',401);
       if(this.env.PI_TOOL_TRANSPORT!=='lambda') fail('Lambda transport is not configured.',503);

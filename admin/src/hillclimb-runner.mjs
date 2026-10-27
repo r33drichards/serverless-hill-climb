@@ -48,7 +48,8 @@ if(await git.resolveRef({fs,dir,ref:'HEAD'})!==${JSON.stringify(pr.head.sha)})th
   await agent.prompt(JSON.stringify({trustedContext:{repository:job.repo,pr:job.number,head:job.head,headRef:job.branch,baseRef:job.baseBranch,workDir:dir,approvedGitBundleUrl:moduleURL,headCloneUrl:remote,session,author:{name:'Hillclimb',email:'hillclimb@users.noreply.github.com'},remainingIterations:10-job.iterations},task:'The exact head is cloned. Inspect the failing checks and source, make one focused repair, commit it with isomorphic-git and push normally to the assigned branch using the approved remote. No merges or test weakening. CI will run after you yield. Re-import git and http in each tool call. Tell the controller if blocked.',untrustedEvidence:{ci,annotations,humanGuidance:job.guidance}}));
   if(completed!==turns)throw blocked('Model inference did not complete.');
   const latest=await a.json(`https://api.github.com/repos/${job.repo}/pulls/${job.number}`,{headers});
-  if(latest.head.sha===job.head)throw blocked('Agent did not produce a verified pushed repair; inspect its result before resuming.');
+  const push=await a.read('hc-push:'+job.key);
+  if(!push||push.old!==job.head||push.next!==latest.head.sha||latest.head.sha===job.head)throw blocked('Agent did not produce a verified pushed repair; inspect its result before resuming.');
   job.previousHead=job.head;job.head=latest.head.sha;
   const last=agent.state.messages.filter(x=>x.role==='assistant').at(-1);
   job.lastResult=(last?.content||[]).filter(x=>x.type==='text').map(x=>x.text).join('\n').slice(0,8000);

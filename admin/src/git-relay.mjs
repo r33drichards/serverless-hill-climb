@@ -1,7 +1,7 @@
 import {installationHeaders} from './hillclimb-controller.mjs';
 const deny=(status=403)=>new Response('Git relay request rejected',{status});
 export function validatePush(bytes,branch,expected){
- const dec=new TextDecoder();let offset=0,commands=0;
+ const dec=new TextDecoder();let offset=0,commands=0,nextSha;
  while(offset+4<=bytes.length){
   const prefix=dec.decode(bytes.slice(offset,offset+4));if(!/^[a-f\d]{4}$/i.test(prefix))throw Error('packet');
   const length=parseInt(prefix,16);offset+=4;if(length===0)break;
@@ -9,9 +9,9 @@ export function validatePush(bytes,branch,expected){
   const line=dec.decode(bytes.slice(offset,offset+length-4)).split('\0')[0].trim();offset+=length-4;
   const parts=line.split(' ');
   if(parts.length!==3||parts[0]!==expected||!/^[a-f0-9]{40}$/.test(parts[1])||/^0+$/.test(parts[1])||parts[2]!==`refs/heads/${branch}`)throw Error('push-scope');
-  if(++commands>1)throw Error('multiple-refs');
+  if(++commands>1)throw Error('multiple-refs');nextSha=parts[1];
  }
- if(commands!==1)throw Error('missing-command');
+ if(commands!==1)throw Error('missing-command');return nextSha;
 }
 async function readBounded(body,max){
  const chunks=[];let size=0;const r=body?.getReader();if(!r)return new Uint8Array();
@@ -31,11 +31,12 @@ export async function gitRelay(a,r){
  const headers=await installationHeaders(a,job);
  const pr=await a.json(`https://api.github.com/repos/${job.repo}/pulls/${job.number}`,{headers});
  if(pr.state!=='open'||pr.head?.sha!==job.head||pr.head?.ref!==job.branch||pr.head?.repo?.id!==job.repoId||!pr.labels?.some(x=>['hill climb','hillclimb'].includes(x.name)))return deny(409);
- let body;
+ let body,nextSha;
  if(r.method==='POST'){
   body=await readBounded(r.body,10*1024*1024);
-  if(m[3]==='git-receive-pack')try{validatePush(body,job.branch,job.head);}catch{return deny();}
+  if(m[3]==='git-receive-pack')try{nextSha=validatePush(body,job.branch,job.head);}catch{return deny();}
  }
+ if(nextSha)await a.save('hc-push:'+job.key,{old:job.head,next:nextSha,status:'intent'});
  const token=headers.Authorization.slice(7);
  const response=await a.fetcher(`https://github.com/${job.repo}.git/${m[3]}${service?'?service='+service:''}`,{
   method:r.method,redirect:'manual',signal:AbortSignal.timeout(25000),

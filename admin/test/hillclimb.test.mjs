@@ -37,3 +37,41 @@ test('Git relay permits only the assigned branch with the expected old SHA',()=>
  assert.doesNotThrow(()=>validatePush(pack(old,next,'fix'),'fix',old));
  for(const bytes of [pack(old,next,'main'),pack('c'.repeat(40),next,'fix'),pack(old,'0'.repeat(40),'fix')])assert.throws(()=>validatePush(bytes,'fix',old));
 });
+import {generateKeyPairSync} from 'node:crypto';
+import {hillclimbEvent,hillclimbAlarm} from '../src/hillclimb-controller.mjs';
+const pem=generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({type:'pkcs8',format:'pem'});
+function controller(){
+ const data=new Map([['github-app',{id:9,privateKey:pem}]]);let posts=0,steps=0;
+ const a={env:{GITHUB_OWNER_ID:'7'},now:()=>1000,read:async k=>structuredClone(data.get(k)),save:async(k,v)=>data.set(k,structuredClone(v)),storage:{get:async k=>structuredClone(data.get(k)),put:async(k,v)=>data.set(k,structuredClone(v)),delete:async k=>data.delete(k),setAlarm:async()=>{},deleteAlarm:async()=>{}},hillclimbStep:async()=>{steps++;},json:async(url,o)=>{
+ if(url.endsWith('/app/installations/3'))return {account:{id:7},app_id:9};
+ if(url.endsWith('/access_tokens'))return {token:'test-token'};
+ if(url.includes('/permission'))return {permission:a.permission||'write'};
+ if(url.includes('/pulls/'))return {state:'open',labels:[{name:'hillclimb'}],base:{repo:{id:1},ref:'main'},head:{repo:{id:1},sha:'a'.repeat(40),ref:'fix'},html_url:'https://github.com/owner/example/pull/2'};
+ if(url.includes('/check-runs'))return {check_runs:[{id:8,name:'test',status:'completed',conclusion:'success'}]};
+ if(url.includes('/statuses'))return [];
+ if(url.includes('/comments')){if(o.method==='POST'){posts++;return {id:55};}return [];}
+ throw Error('unexpected endpoint');}};
+ return {a,data,posts:()=>posts,steps:()=>steps};
+}
+const labelEvent=()=>({action:'labeled',label:{name:'hillclimb'},repository:{id:1,owner:{id:7},full_name:'owner/example'},installation:{id:3},sender:{login:'owner',type:'User'},pull_request:{number:2}});
+test('controller verifies actor permissions before admitting a label event',async()=>{
+ const {a,data}=controller();a.permission='read';
+ assert.equal((await hillclimbEvent(a,labelEvent(),'pull_request','delivery-1')).reason,'actor-permission');
+ assert.equal(data.has('hc:1:2'),false);
+});
+test('duplicate labels preserve a single job and startup comment; green CI needs no model call',async()=>{
+ const f=controller();await hillclimbEvent(f.a,labelEvent(),'pull_request','delivery-1');
+ assert.equal((await hillclimbEvent(f.a,labelEvent(),'pull_request','delivery-1')).duplicate,true);
+ await hillclimbAlarm(f.a);assert.equal(f.posts(),1);assert.equal(f.steps(),0);
+ assert.equal((await f.a.read('hc:1:2')).phase,'green');
+});
+test('status reply reports without scheduling a repair, bot reply is ignored',async()=>{
+ const f=controller();await hillclimbEvent(f.a,labelEvent(),'pull_request','delivery-1');await hillclimbAlarm(f.a);
+ const p={...labelEvent(),action:'created',issue:{number:2,pull_request:{}},comment:{id:99,body:'/hillclimb status',user:{type:'User',login:'owner'}}};
+ await hillclimbEvent(f.a,p,'issue_comment','delivery-2');assert.deepEqual(await f.a.storage.get('hc-queue'),[]);
+ p.comment.user.type='Bot';assert.equal((await hillclimbEvent(f.a,p,'issue_comment','delivery-3')).status,'ignored');
+});
+test('interrupted executing job is blocked instead of replaying tool calls',async()=>{
+ const f=controller();const j=job();j.phase='executing';await f.a.save(j.key,j);await f.a.storage.put('hc-queue',[j.key]);
+ await hillclimbAlarm(f.a);assert.equal((await f.a.read(j.key)).phase,'blocked');assert.equal(f.steps(),0);
+});

@@ -98,14 +98,16 @@ export async function hillclimbAlarm(a){
    const head=pr.head.sha;if(!/^[a-f0-9]{40}$/.test(head))throw Error('invalid-head');
    const checks=await list(a,`${API}/repos/${job.repo}/commits/${head}/check-runs`,headers,'check_runs');
    const statuses=await list(a,`${API}/repos/${job.repo}/commits/${head}/statuses`,headers);
-   const ci=ciState(checks,statuses);job.head=head;job.branch=pr.head.ref;job.baseBranch=pr.base.ref;
+   const ci=ciState(checks,statuses);job.ciPolls=(job.ciPolls||0)+1;
+   if(job.ciPolls>120)throw Object.assign(Error('ci-wait-budget'),{hillclimbReason:'CI observation limit reached; inspect checks and resume when ready.'});
+   job.head=head;job.branch=pr.head.ref;job.baseBranch=pr.base.ref;
    if(ci.phase==='failing'){
     const fingerprint=ci.failures.map(c=>c.name||c.context).sort().join('|');
     if(consumeAttempt(job,fingerprint)){
      // Intent survives crash; unknown mutations are never automatically replayed.
      job.phase='executing';await a.save(key,job);
      await a.hillclimbStep(job,{pr,ci,headers});
-     job.phase='waiting_ci';
+     job.ciPolls=0;job.phase='waiting_ci';
     }
    }else job.phase=ci.phase;
    job.summary=`Observed [${head.slice(0,12)}](${pr.html_url}/commits/${head}): ${ci.failures.length} failing, ${ci.pending.length} pending checks.`;
